@@ -870,7 +870,7 @@ impl AgentFS {
         }
 
         // Too many symlinks
-        anyhow::bail!("Too many levels of symbolic links")
+        return Err(FsError::SymlinkLoop.into())
     }
 
     /// Get file statistics, following symlinks (using provided connection)
@@ -932,7 +932,7 @@ impl AgentFS {
         }
 
         // Too many symlinks
-        anyhow::bail!("Too many levels of symbolic links")
+        return Err(FsError::SymlinkLoop.into())
     }
 
     /// Create a directory
@@ -942,7 +942,7 @@ impl AgentFS {
         let components = self.split_path(&path);
 
         if components.is_empty() {
-            anyhow::bail!("Cannot create root directory");
+            return Err(FsError::RootOperation.into());
         }
 
         let parent_path = if components.len() == 1 {
@@ -954,13 +954,13 @@ impl AgentFS {
         let parent_ino = self
             .resolve_path_with_conn(&conn, &parent_path)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Parent directory does not exist"))?;
+            .ok_or(FsError::NotFound)?;
 
         let name = components.last().unwrap();
 
         // Check if already exists (single query using parent_ino we already have)
         if self.lookup_child(&conn, parent_ino, name).await?.is_some() {
-            anyhow::bail!("Directory already exists");
+            return Err(FsError::AlreadyExists.into());
         }
 
         // Create inode
@@ -1006,7 +1006,7 @@ impl AgentFS {
         let components = self.split_path(&path);
 
         if components.is_empty() {
-            anyhow::bail!("Cannot write to root directory");
+            return Err(FsError::RootOperation.into());
         }
 
         let parent_path = if components.len() == 1 {
@@ -1018,7 +1018,7 @@ impl AgentFS {
         let parent_ino = self
             .resolve_path_with_conn(&conn, &parent_path)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Parent directory does not exist"))?;
+            .ok_or(FsError::NotFound)?;
 
         let name = components.last().unwrap();
 
@@ -1126,7 +1126,7 @@ impl AgentFS {
         let components = self.split_path(&path);
 
         if components.is_empty() {
-            anyhow::bail!("Cannot create root directory");
+            return Err(FsError::RootOperation.into());
         }
 
         let parent_path = match components.len() {
@@ -1137,7 +1137,7 @@ impl AgentFS {
         let parent_ino = self
             .resolve_path_with_conn(&conn, &parent_path)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Parent directory does not exist"))?;
+            .ok_or(FsError::NotFound)?;
 
         let name = components.last().unwrap();
 
@@ -1291,7 +1291,7 @@ impl AgentFS {
         let components = self.split_path(&path);
 
         if components.is_empty() {
-            anyhow::bail!("Cannot write to root directory");
+            return Err(FsError::RootOperation.into());
         }
 
         let parent_path = if components.len() == 1 {
@@ -1303,7 +1303,7 @@ impl AgentFS {
         let parent_ino = self
             .resolve_path_with_conn(&conn, &parent_path)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Parent directory does not exist"))?;
+            .ok_or(FsError::NotFound)?;
 
         let name = components.last().unwrap();
 
@@ -1787,7 +1787,7 @@ impl AgentFS {
         let components = self.split_path(&linkpath);
 
         if components.is_empty() {
-            anyhow::bail!("Cannot create symlink at root");
+            return Err(FsError::RootOperation.into());
         }
 
         // Get parent directory
@@ -1800,13 +1800,13 @@ impl AgentFS {
         let parent_ino = self
             .resolve_path_with_conn(&conn, &parent_path)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Parent directory does not exist"))?;
+            .ok_or(FsError::NotFound)?;
 
         let name = components.last().unwrap();
 
         // Check if entry already exists (single query using parent_ino we already have)
         if self.lookup_child(&conn, parent_ino, name).await?.is_some() {
-            anyhow::bail!("Path already exists");
+            return Err(FsError::AlreadyExists.into());
         }
 
         // Create inode for symlink
@@ -1872,14 +1872,14 @@ impl AgentFS {
         let components = self.split_path(&newpath);
 
         if components.is_empty() {
-            anyhow::bail!("Cannot create hard link at root");
+            return Err(FsError::RootOperation.into());
         }
 
         // Resolve old path to get its inode
         let ino = self
             .resolve_path_with_conn(&conn, &oldpath)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Source path does not exist"))?;
+            .ok_or(FsError::NotFound)?;
 
         // Check if source is a directory (hard links to directories are not allowed)
         let mut rows = conn
@@ -1894,7 +1894,7 @@ impl AgentFS {
                 .unwrap_or(0) as u32;
 
             if (mode & S_IFMT) == super::S_IFDIR {
-                anyhow::bail!("Cannot create hard link to directory");
+                return Err(FsError::IsADirectory.into());
             }
         } else {
             return Err(FsError::NotFound.into());
@@ -1916,7 +1916,7 @@ impl AgentFS {
 
         // Check if new path already exists (single query using parent_ino we already have)
         if self.lookup_child(&conn, parent_ino, name).await?.is_some() {
-            anyhow::bail!("Path already exists");
+            return Err(FsError::AlreadyExists.into());
         }
 
         // Create directory entry pointing to the same inode
@@ -1972,7 +1972,7 @@ impl AgentFS {
 
             // Check if it's a symlink
             if (mode & S_IFMT) != S_IFLNK {
-                anyhow::bail!("Not a symbolic link");
+                return Err(FsError::NotASymlink.into());
             }
         } else {
             return Ok(None);
@@ -2005,16 +2005,16 @@ impl AgentFS {
         let components = self.split_path(&path);
 
         if components.is_empty() {
-            anyhow::bail!("Cannot remove root directory");
+            return Err(FsError::RootOperation.into());
         }
 
         let ino = self
             .resolve_path_with_conn(&conn, &path)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Path does not exist"))?;
+            .ok_or(FsError::NotFound)?;
 
         if ino == ROOT_INO {
-            anyhow::bail!("Cannot remove root directory");
+            return Err(FsError::RootOperation.into());
         }
 
         // Check if directory is empty
@@ -2030,7 +2030,7 @@ impl AgentFS {
                 .and_then(|v| v.as_integer().copied())
                 .unwrap_or(0);
             if count > 0 {
-                anyhow::bail!("Directory not empty");
+                return Err(FsError::NotEmpty.into());
             }
         }
 
@@ -2044,7 +2044,7 @@ impl AgentFS {
         let parent_ino = self
             .resolve_path_with_conn(&conn, &parent_path)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Parent directory does not exist"))?;
+            .ok_or(FsError::NotFound)?;
 
         let name = components.last().unwrap();
 
@@ -2099,7 +2099,7 @@ impl AgentFS {
         let ino = self
             .resolve_path_with_conn(&conn, &path)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Path does not exist"))?;
+            .ok_or(FsError::NotFound)?;
 
         // Get current mode to preserve file type bits
         let mut stmt = conn

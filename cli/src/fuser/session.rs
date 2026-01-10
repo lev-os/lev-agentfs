@@ -6,16 +6,19 @@
 //! for filesystem operations under its mount point.
 
 use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
-use log::{info, warn};
+use log::{debug, info, warn};
 use nix::unistd::geteuid;
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
+use tokio::runtime::Runtime;
 
 use super::ll::fuse_abi as abi;
-use super::request::Request;
+use super::request::{dispatch_request, Request};
 use super::Filesystem;
 use super::MountOption;
 use super::{channel::Channel, mnt::Mount};
@@ -30,7 +33,7 @@ pub const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
 /// up to `MAX_WRITE_SIZE` bytes in a write request, we use that value plus some extra space.
 const BUFFER_SIZE: usize = MAX_WRITE_SIZE + 4096;
 
-#[derive(Default, Debug, Eq, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
 /// How requests should be filtered based on the calling UID.
 pub enum SessionACL {
     /// Allow requests from any user. Corresponds to the `allow_other` mount option.
@@ -40,6 +43,27 @@ pub enum SessionACL {
     /// Allow requests from the owning UID. This is FUSE's default mode of operation.
     #[default]
     Owner,
+}
+
+/// Shared session state for concurrent request handling.
+/// This allows multiple async tasks to access session state safely.
+pub struct SharedSessionState<FS: Filesystem> {
+    /// Filesystem operation implementations (shared via Arc)
+    pub(crate) filesystem: Arc<FS>,
+    /// Channel sender for replies (cloneable)
+    pub(crate) sender: ChannelSender,
+    /// Whether to restrict access to owner, root + owner, or unrestricted
+    pub(crate) allowed: SessionACL,
+    /// User that launched the fuser process
+    pub(crate) session_owner: u32,
+    /// FUSE protocol major version
+    pub(crate) proto_major: AtomicU32,
+    /// FUSE protocol minor version
+    pub(crate) proto_minor: AtomicU32,
+    /// True if the filesystem is initialized (init operation done)
+    pub(crate) initialized: AtomicBool,
+    /// True if the filesystem was destroyed (destroy operation done)
+    pub(crate) destroyed: AtomicBool,
 }
 
 /// The session data structure
@@ -72,7 +96,7 @@ impl<FS: Filesystem> AsFd for Session<FS> {
     }
 }
 
-impl<FS: Filesystem> Session<FS> {
+impl<FS: Filesystem + 'static> Session<FS> {
     /// Create a new session by mounting the given filesystem to the given mountpoint
     /// # Errors
     /// Returns an error if the options are incorrect, or if the fuse device can't be mounted.
@@ -140,38 +164,88 @@ impl<FS: Filesystem> Session<FS> {
     }
 
     /// Run the session loop that receives kernel requests and dispatches them to method
-    /// calls into the filesystem. This read-dispatch-loop is non-concurrent to prevent
-    /// having multiple buffers (which take up much memory), but the filesystem methods
-    /// may run concurrent by spawning threads.
+    /// calls into the filesystem. Requests are processed in parallel by spawning async
+    /// tasks for each incoming request.
     /// # Errors
     /// Returns any final error when the session comes to an end.
-    pub fn run(&mut self) -> io::Result<()> {
-        // Buffer for receiving requests from the kernel. Only one is allocated and
-        // it is reused immediately after dispatching to conserve memory and allocations.
+    pub fn run(&mut self, runtime: &Runtime) -> io::Result<()> {
+        // Create shared state for concurrent request handling
+        let shared = Arc::new(SharedSessionState {
+            filesystem: Arc::new(unsafe {
+                // SAFETY: We're moving the filesystem into Arc. The Session will not
+                // be used after run() returns, and we reconstruct it for destroy().
+                std::ptr::read(&self.filesystem)
+            }),
+            sender: self.ch.sender(),
+            allowed: self.allowed.clone(),
+            session_owner: self.session_owner,
+            proto_major: AtomicU32::new(0),
+            proto_minor: AtomicU32::new(0),
+            initialized: AtomicBool::new(false),
+            destroyed: AtomicBool::new(false),
+        });
+
+        // Process the first request (INIT) synchronously to establish protocol version
         let mut buffer = vec![0; BUFFER_SIZE];
         let buf = aligned_sub_buf(&mut buffer, std::mem::align_of::<abi::fuse_in_header>());
+
+        // Handle INIT synchronously - must complete before parallel processing
         loop {
-            // Read the next request from the given channel to kernel driver
-            // The kernel driver makes sure that we get exactly one request per read
             match self.ch.receive(buf) {
-                Ok(size) => match Request::new(self.ch.sender(), &buf[..size]) {
-                    // Dispatch request
-                    Some(req) => req.dispatch(self),
-                    // Quit loop on illegal request
-                    None => break,
-                },
+                Ok(size) => {
+                    let data = buf[..size].to_vec(); // Copy for owned request
+                    if let Some(is_init) = runtime.block_on(dispatch_request(shared.clone(), data)) {
+                        if is_init {
+                            // INIT completed, now we can process requests in parallel
+                            break;
+                        }
+                    } else {
+                        // Invalid request before init
+                        continue;
+                    }
+                }
                 Err(err) => match err.raw_os_error() {
-                    Some(
-                          ENOENT // Operation interrupted. Accordingly to FUSE, this is safe to retry
-                        | EINTR // Interrupted system call, retry
-                        | EAGAIN // Explicitly instructed to try again
-                    ) => continue,
-                    Some(ENODEV) => break,
-                    // Unhandled error
+                    Some(ENOENT | EINTR | EAGAIN) => continue,
+                    Some(ENODEV) => return Ok(()),
                     _ => return Err(err),
                 },
             }
         }
+
+        debug!("FUSE initialized, entering parallel request processing");
+
+        // Main loop: spawn tasks for parallel request handling
+        loop {
+            match self.ch.receive(buf) {
+                Ok(size) => {
+                    // Copy buffer data so the task owns it
+                    let data = buf[..size].to_vec();
+                    let shared = shared.clone();
+
+                    // Spawn async task to handle this request
+                    runtime.spawn(async move {
+                        dispatch_request(shared, data).await;
+                    });
+                }
+                Err(err) => match err.raw_os_error() {
+                    Some(ENOENT | EINTR | EAGAIN) => continue,
+                    Some(ENODEV) => break,
+                    _ => return Err(err),
+                },
+            }
+        }
+
+        // Wait for any in-flight requests and call destroy
+        // Note: In practice, ENODEV means the mount is gone, so requests should complete quickly
+        if !shared.destroyed.load(Ordering::Acquire) {
+            shared.filesystem.destroy();
+            shared.destroyed.store(true, Ordering::Release);
+        }
+
+        // Prevent double-drop of filesystem
+        std::mem::forget(unsafe { std::ptr::read(&self.filesystem) });
+        self.destroyed = true;
+
         Ok(())
     }
 
@@ -218,8 +292,8 @@ fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
 
 impl<FS: 'static + Filesystem + Send> Session<FS> {
     /// Run the session loop in a background thread
-    pub fn spawn(self) -> io::Result<BackgroundSession> {
-        BackgroundSession::new(self)
+    pub fn spawn(self, runtime: Arc<Runtime>) -> io::Result<BackgroundSession> {
+        BackgroundSession::new(self, runtime)
     }
 }
 
@@ -251,13 +325,13 @@ impl BackgroundSession {
     /// Create a new background session for the given session by running its
     /// session loop in a background thread. If the returned handle is dropped,
     /// the filesystem is unmounted and the given session ends.
-    pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>) -> io::Result<BackgroundSession> {
+    pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>, runtime: Arc<Runtime>) -> io::Result<BackgroundSession> {
         let sender = se.ch.sender();
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *se.mount.lock().unwrap()).map(|(_, mount)| mount);
         let guard = thread::spawn(move || {
             let mut se = se;
-            se.run()
+            se.run(&runtime)
         });
         Ok(BackgroundSession {
             guard,

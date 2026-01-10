@@ -483,8 +483,10 @@ impl OverlayFS {
     /// base layer represents. This is stored in the delta database so that
     /// tools like `agentfs diff` can determine what files were modified.
     pub async fn init(&self, base_path: &str) -> Result<()> {
-        let conn = self.delta.get_conn().await?;
-        Self::init_schema(&conn, base_path).await?;
+        {
+            let conn = self.delta.get_conn().await?;
+            Self::init_schema(&conn, base_path).await?;
+        } // Drop conn before getting another
         // Load existing whiteouts into the in-memory cache
         self.load_whiteouts_into_cache().await?;
         Ok(())

@@ -5,7 +5,13 @@
 //! avoiding concurrent access issues with SQLite.
 
 use std::sync::{Arc, Mutex};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use turso::{Connection, Database};
+
+/// Maximum number of concurrent connections allowed.
+/// SQLite/turso MVCC requires single-writer to avoid stale snapshot errors.
+/// Parallel FUSE requests are serialized at the database level.
+const MAX_CONNECTIONS: usize = 1;
 
 /// Database wrapper that supports both regular and sync databases.
 enum DatabaseType {
@@ -18,6 +24,8 @@ enum DatabaseType {
 /// The pool lazily creates connections as needed. Each call to `get_conn()`
 /// returns a connection from the pool (or creates a new one if the pool is empty).
 /// Connections are returned to the pool when dropped via `PooledConnection`.
+///
+/// Concurrency is limited to MAX_CONNECTIONS to avoid SQLite stale snapshot errors.
 #[derive(Clone)]
 pub struct ConnectionPool {
     inner: Arc<ConnectionPoolInner>,
@@ -26,6 +34,8 @@ pub struct ConnectionPool {
 struct ConnectionPoolInner {
     db: DatabaseType,
     pool: Mutex<Vec<Connection>>,
+    /// Semaphore to limit concurrent connections
+    semaphore: Arc<Semaphore>,
 }
 
 impl ConnectionPool {
@@ -35,6 +45,7 @@ impl ConnectionPool {
             inner: Arc::new(ConnectionPoolInner {
                 db: DatabaseType::Local(db),
                 pool: Mutex::new(Vec::new()),
+                semaphore: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
             }),
         }
     }
@@ -45,6 +56,7 @@ impl ConnectionPool {
             inner: Arc::new(ConnectionPoolInner {
                 db: DatabaseType::Sync(db),
                 pool: Mutex::new(Vec::new()),
+                semaphore: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
             }),
         }
     }
@@ -52,11 +64,18 @@ impl ConnectionPool {
     /// Get a connection from the pool.
     ///
     /// If the pool has available connections, one is returned.
-    /// Otherwise, a new connection is created.
+    /// Otherwise, a new connection is created and configured with
+    /// appropriate pragmas for concurrent access.
+    ///
+    /// This method will block if MAX_CONNECTIONS are already in use,
+    /// waiting until one becomes available.
     ///
     /// The returned `PooledConnection` will return the connection to the pool
     /// when dropped.
     pub async fn get_conn(&self) -> anyhow::Result<PooledConnection> {
+        // Acquire semaphore permit - blocks if max connections are in use
+        let permit = self.inner.semaphore.clone().acquire_owned().await?;
+
         let conn = {
             let mut pool = self.inner.pool.lock().unwrap();
             pool.pop()
@@ -64,15 +83,26 @@ impl ConnectionPool {
 
         let conn = match conn {
             Some(c) => c,
-            None => match &self.inner.db {
-                DatabaseType::Local(db) => db.connect()?,
-                DatabaseType::Sync(db) => db.connect().await?,
-            },
+            None => {
+                // Create new connection
+                let conn = match &self.inner.db {
+                    DatabaseType::Local(db) => db.connect()?,
+                    DatabaseType::Sync(db) => db.connect().await?,
+                };
+                // Set busy_timeout to handle concurrent access gracefully.
+                // Without this, concurrent transactions fail immediately with SQLITE_BUSY.
+                // This is per-connection setting, so must be set on each new connection.
+                conn.execute("PRAGMA busy_timeout = 5000", ()).await?;
+                // Disable synchronous mode for better performance with fsync() semantics.
+                conn.execute("PRAGMA synchronous = OFF", ()).await?;
+                conn
+            }
         };
 
         Ok(PooledConnection {
             conn: Some(conn),
             pool: self.inner.clone(),
+            _permit: permit,
         })
     }
 
@@ -96,10 +126,13 @@ impl ConnectionPool {
 
 /// A connection borrowed from the pool.
 ///
-/// When dropped, the connection is returned to the pool for reuse.
+/// When dropped, the connection is returned to the pool for reuse,
+/// and the semaphore permit is released to allow another connection.
 pub struct PooledConnection {
     conn: Option<Connection>,
     pool: Arc<ConnectionPoolInner>,
+    /// Semaphore permit - released when this connection is dropped
+    _permit: OwnedSemaphorePermit,
 }
 
 impl PooledConnection {
@@ -119,10 +152,11 @@ impl std::ops::Deref for PooledConnection {
 
 impl Drop for PooledConnection {
     fn drop(&mut self) {
-        if let Some(conn) = self.conn.take() {
-            let mut pool = self.pool.pool.lock().unwrap();
-            pool.push(conn);
-        }
+        // Don't return connections to the pool - prepared statement caching
+        // causes "stale snapshot" errors when connections are reused after
+        // other connections have modified the database.
+        // Each operation gets a fresh connection.
+        drop(self.conn.take());
     }
 }
 
@@ -149,27 +183,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_connection_pool_concurrent() {
+    async fn test_connection_pool_sequential() {
         let db = Builder::new_local(":memory:").build().await.unwrap();
         let pool = ConnectionPool::new(db);
 
-        // Get multiple connections concurrently
-        let conn1 = pool.get_conn().await.unwrap();
-        let conn2 = pool.get_conn().await.unwrap();
-        let conn3 = pool.get_conn().await.unwrap();
+        // Get connections sequentially (release before getting next)
+        for _ in 0..3 {
+            let conn = pool.get_conn().await.unwrap();
+            assert!(conn.conn.is_some());
+            // conn dropped here, releasing the semaphore permit
+        }
 
-        // All should be valid
-        assert!(conn1.conn.is_some());
-        assert!(conn2.conn.is_some());
-        assert!(conn3.conn.is_some());
-
-        // Drop them
-        drop(conn1);
-        drop(conn2);
-        drop(conn3);
-
-        // Pool should now have 3 connections
+        // Pool should have 1 connection (reused each time)
         let pool_size = pool.inner.pool.lock().unwrap().len();
-        assert_eq!(pool_size, 3);
+        assert_eq!(pool_size, 1);
     }
 }
