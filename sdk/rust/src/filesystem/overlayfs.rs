@@ -562,6 +562,11 @@ impl OverlayFS {
         let conn = self.delta.get_connection().await?;
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
+
         let mut stmt = conn
             .prepare_cached(
                 "INSERT INTO fs_whiteout (path, parent_path, created_at) VALUES (?, ?, ?)
@@ -570,6 +575,8 @@ impl OverlayFS {
             .await?;
         stmt.execute((normalized.as_str(), parent.as_str(), now))
             .await?;
+
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
 
         // Update in-memory cache
         self.whiteout_cache.insert(&normalized);
@@ -590,10 +597,17 @@ impl OverlayFS {
 
         let conn = self.delta.get_connection().await?;
 
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
+
         let mut stmt = conn
             .prepare_cached("DELETE FROM fs_whiteout WHERE path = ?")
             .await?;
         stmt.execute((normalized.as_str(),)).await?;
+
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
 
         // Update in-memory cache
         self.whiteout_cache.remove(&normalized);
@@ -704,10 +718,19 @@ impl OverlayFS {
     /// so stat() can return the original inode number (like Linux overlayfs).
     async fn add_origin_mapping(&self, delta_ino: i64, base_ino: i64) -> Result<()> {
         let conn = self.delta.get_connection().await?;
+
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
+
         let mut stmt = conn
             .prepare_cached("INSERT OR REPLACE INTO fs_origin (delta_ino, base_ino) VALUES (?, ?)")
             .await?;
         stmt.execute((delta_ino, base_ino)).await?;
+
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
+
         Ok(())
     }
 
@@ -739,9 +762,17 @@ impl OverlayFS {
     /// Called when a file is deleted from the delta layer to clean up stale mappings.
     async fn remove_origin_mapping(&self, delta_ino: i64) -> Result<()> {
         let conn = self.delta.get_connection().await?;
+
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
+
         let result = conn
             .execute("DELETE FROM fs_origin WHERE delta_ino = ?", (delta_ino,))
             .await;
+
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
 
         // Ignore errors for existing databases without fs_origin table
         match result {

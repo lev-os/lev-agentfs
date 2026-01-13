@@ -165,7 +165,7 @@ impl File for AgentFSFile {
 
         let conn = self.pool.get_connection().await?;
 
-        conn.prepare_cached("BEGIN IMMEDIATE")
+        conn.prepare_cached("BEGIN CONCURRENT")
             .await?
             .execute(())
             .await?;
@@ -227,7 +227,7 @@ impl File for AgentFSFile {
 
         let chunk_size = self.chunk_size as u64;
 
-        conn.prepare_cached("BEGIN IMMEDIATE")
+        conn.prepare_cached("BEGIN CONCURRENT")
             .await?
             .execute(())
             .await?;
@@ -408,6 +408,9 @@ impl AgentFS {
 
         // Disable synchronous mode for filesystem fsync() semantics.
         conn.execute("PRAGMA synchronous = OFF", ()).await?;
+
+        // Enable MVCC journal mode for concurrent transactions.
+        conn.pragma_update("journal_mode", "'experimental_mvcc'").await?;
 
         // Set busy timeout to handle concurrent access gracefully.
         // Without this, concurrent transactions fail immediately with SQLITE_BUSY.
@@ -781,7 +784,22 @@ impl AgentFS {
     pub async fn lstat(&self, path: &str) -> Result<Option<Stats>> {
         let conn = self.pool.get_connection().await?;
         let path = self.normalize_path(path);
-        let ino = match self.resolve_path_with_conn(&conn, &path).await? {
+
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
+
+        let result = self.lstat_inner(&conn, &path).await;
+
+        // Always end the transaction, even on error
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
+        result
+    }
+
+    /// Inner implementation of lstat (called within a transaction)
+    async fn lstat_inner(&self, conn: &Connection, path: &str) -> Result<Option<Stats>> {
+        let ino = match self.resolve_path_with_conn(conn, path).await? {
             Some(ino) => ino,
             None => return Ok(None),
         };
@@ -804,12 +822,25 @@ impl AgentFS {
         let conn = self.pool.get_connection().await?;
         let path = self.normalize_path(path);
 
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
+
+        let result = self.stat_inner(&conn, path).await;
+
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
+        result
+    }
+
+    /// Inner implementation of stat (called within a transaction)
+    async fn stat_inner(&self, conn: &Connection, path: String) -> Result<Option<Stats>> {
         // Follow symlinks with a maximum depth to prevent infinite loops
         let mut current_path = path;
         let max_symlink_depth = 40; // Standard limit for symlink following
 
         for _ in 0..max_symlink_depth {
-            let ino = match self.resolve_path_with_conn(&conn, &current_path).await? {
+            let ino = match self.resolve_path_with_conn(conn, &current_path).await? {
                 Some(ino) => ino,
                 None => return Ok(None),
             };
@@ -832,7 +863,7 @@ impl AgentFS {
                 if (mode & S_IFMT) == S_IFLNK {
                     // Read the symlink target
                     let target = self
-                        .readlink_with_conn(&conn, &current_path)
+                        .readlink_with_conn(conn, &current_path)
                         .await?
                         .ok_or(FsError::NotFound)?;
 
@@ -952,6 +983,11 @@ impl AgentFS {
             return Err(FsError::AlreadyExists.into());
         }
 
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
+
         // Create inode
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
         let mut stmt = conn
@@ -982,6 +1018,8 @@ impl AgentFS {
             .await?;
         stmt.execute((ino,)).await?;
 
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
+
         // Populate dentry cache
         self.dentry_cache.insert(parent_ino, name, ino);
 
@@ -1011,7 +1049,7 @@ impl AgentFS {
 
         let name = components.last().unwrap();
 
-        conn.prepare_cached("BEGIN IMMEDIATE")
+        conn.prepare_cached("BEGIN CONCURRENT")
             .await?
             .execute(())
             .await?;
@@ -1138,7 +1176,7 @@ impl AgentFS {
             .prepare_cached("INSERT INTO fs_dentry (name, parent_ino, ino) VALUES (?, ?, ?)")
             .await?;
 
-        conn.prepare_cached("BEGIN IMMEDIATE")
+        conn.prepare_cached("BEGIN CONCURRENT")
             .await?
             .execute(())
             .await?;
@@ -1286,7 +1324,7 @@ impl AgentFS {
 
         let name = components.last().unwrap();
 
-        conn.prepare_cached("BEGIN IMMEDIATE")
+        conn.prepare_cached("BEGIN CONCURRENT")
             .await?
             .execute(())
             .await?;
@@ -1489,7 +1527,7 @@ impl AgentFS {
 
         let chunk_size = self.chunk_size as u64;
 
-        conn.prepare_cached("BEGIN IMMEDIATE")
+        conn.prepare_cached("BEGIN CONCURRENT")
             .await?
             .execute(())
             .await?;
@@ -1618,9 +1656,18 @@ impl AgentFS {
     /// List directory contents
     pub async fn readdir(&self, path: &str) -> Result<Option<Vec<String>>> {
         let conn = self.pool.get_connection().await?;
+
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
+
         let ino = match self.resolve_path_with_conn(&conn, path).await? {
             Some(ino) => ino,
-            None => return Ok(None),
+            None => {
+                conn.prepare_cached("COMMIT").await?.execute(()).await?;
+                return Ok(None);
+            }
         };
 
         let mut rows = conn
@@ -1648,6 +1695,7 @@ impl AgentFS {
             }
         }
 
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
         Ok(Some(entries))
     }
 
@@ -1656,9 +1704,18 @@ impl AgentFS {
     /// Returns entries with their stats in a single JOIN query, avoiding N+1 queries.
     pub async fn readdir_plus(&self, path: &str) -> Result<Option<Vec<DirEntry>>> {
         let conn = self.pool.get_connection().await?;
+
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
+
         let ino = match self.resolve_path_with_conn(&conn, path).await? {
             Some(ino) => ino,
-            None => return Ok(None),
+            None => {
+                conn.prepare_cached("COMMIT").await?.execute(()).await?;
+                return Ok(None);
+            }
         };
 
         // Single JOIN query to get all entry names and their stats (including link count)
@@ -1746,6 +1803,7 @@ impl AgentFS {
             entries.push(DirEntry { name, stats });
         }
 
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
         Ok(Some(entries))
     }
 
@@ -1777,6 +1835,11 @@ impl AgentFS {
         if self.lookup_child(&conn, parent_ino, name).await?.is_some() {
             return Err(FsError::AlreadyExists.into());
         }
+
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
 
         // Create inode for symlink
         let now = SystemTime::now()
@@ -1822,6 +1885,8 @@ impl AgentFS {
             (ino,),
         )
         .await?;
+
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
 
         // Populate dentry cache
         self.dentry_cache.insert(parent_ino, name, ino);
@@ -1888,6 +1953,11 @@ impl AgentFS {
             return Err(FsError::AlreadyExists.into());
         }
 
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
+
         // Create directory entry pointing to the same inode
         conn.execute(
             "INSERT INTO fs_dentry (name, parent_ino, ino) VALUES (?, ?, ?)",
@@ -1901,6 +1971,8 @@ impl AgentFS {
             (ino,),
         )
         .await?;
+
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
 
         // Populate dentry cache
         self.dentry_cache.insert(parent_ino, name, ino);
@@ -2013,14 +2085,16 @@ impl AgentFS {
 
         let name = components.last().unwrap();
 
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
+
         // Delete the specific directory entry (not all entries pointing to this inode)
         let mut stmt = conn
             .prepare_cached("DELETE FROM fs_dentry WHERE parent_ino = ? AND name = ?")
             .await?;
         stmt.execute((parent_ino, name.as_str())).await?;
-
-        // Invalidate cache for this entry
-        self.dentry_cache.remove(parent_ino, name);
 
         // Decrement link count
         let mut stmt = conn
@@ -2050,6 +2124,11 @@ impl AgentFS {
                 .await?;
             stmt.execute((ino,)).await?;
         }
+
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
+
+        // Invalidate cache for this entry
+        self.dentry_cache.remove(parent_ino, name);
 
         Ok(())
     }
@@ -2084,10 +2163,17 @@ impl AgentFS {
         // Preserve file type bits (upper bits), replace permission bits (lower 12 bits)
         let new_mode = (current_mode & S_IFMT) | (mode & 0o7777);
 
+        conn.prepare_cached("BEGIN CONCURRENT")
+            .await?
+            .execute(())
+            .await?;
+
         let mut stmt = conn
             .prepare_cached("UPDATE fs_inode SET mode = ? WHERE ino = ?")
             .await?;
         stmt.execute((new_mode as i64, ino)).await?;
+
+        conn.prepare_cached("COMMIT").await?.execute(()).await?;
 
         Ok(())
     }
@@ -2161,7 +2247,7 @@ impl AgentFS {
         let src_name = src_name.clone();
         let dst_name = dst_name.clone();
 
-        conn.prepare_cached("BEGIN IMMEDIATE")
+        conn.prepare_cached("BEGIN CONCURRENT")
             .await?
             .execute(())
             .await?;
