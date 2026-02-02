@@ -663,9 +663,32 @@ impl FileSystem for OverlayFS {
 
         let mut entries = HashSet::new();
 
-        // Get delta entries
-        if info.layer == Layer::Delta {
-            if let Some(delta_entries) = self.delta.readdir(info.underlying_ino).await? {
+        // Get delta entries - always walk the path to find delta directory
+        // (it may exist even if the overlay inode points to base layer)
+        let delta_ino = if info.layer == Layer::Delta {
+            Some(info.underlying_ino)
+        } else {
+            // Walk delta to find corresponding directory
+            let components: Vec<&str> = info.path.split('/').filter(|s| !s.is_empty()).collect();
+            let mut ino: i64 = 1;
+            let mut found_all = true;
+            for comp in &components {
+                if let Some(s) = self.delta.lookup(ino, comp).await? {
+                    ino = s.ino;
+                } else {
+                    found_all = false;
+                    break;
+                }
+            }
+            if found_all {
+                Some(ino)
+            } else {
+                None
+            }
+        };
+
+        if let Some(delta_ino) = delta_ino {
+            if let Some(delta_entries) = self.delta.readdir(delta_ino).await? {
                 entries.extend(delta_entries);
             }
         }
@@ -765,9 +788,32 @@ impl FileSystem for OverlayFS {
             }
         }
 
-        // Get delta entries (override base)
-        if info.layer == Layer::Delta {
-            if let Some(delta_entries) = self.delta.readdir_plus(info.underlying_ino).await? {
+        // Get delta entries (override base) - always walk the path to find delta directory
+        // (it may exist even if the overlay inode points to base layer)
+        let delta_ino = if info.layer == Layer::Delta {
+            Some(info.underlying_ino)
+        } else {
+            // Walk delta to find corresponding directory
+            let components: Vec<&str> = info.path.split('/').filter(|s| !s.is_empty()).collect();
+            let mut ino: i64 = 1;
+            let mut found_all = true;
+            for comp in &components {
+                if let Some(s) = self.delta.lookup(ino, comp).await? {
+                    ino = s.ino;
+                } else {
+                    found_all = false;
+                    break;
+                }
+            }
+            if found_all {
+                Some(ino)
+            } else {
+                None
+            }
+        };
+
+        if let Some(delta_ino) = delta_ino {
+            if let Some(delta_entries) = self.delta.readdir_plus(delta_ino).await? {
                 for mut entry in delta_entries {
                     let entry_path = if info.path == "/" {
                         format!("/{}", entry.name)
@@ -1042,9 +1088,30 @@ impl FileSystem for OverlayFS {
             return Err(FsError::IsADirectory.into());
         }
 
-        // Try to remove from delta
-        if parent_info.layer == Layer::Delta {
-            let _ = FileSystem::unlink(&self.delta, parent_info.underlying_ino, name).await;
+        // Try to remove from delta - always walk the path to find delta parent
+        // (it may exist even if the overlay inode points to base layer)
+        let delta_parent_ino = if parent_info.layer == Layer::Delta {
+            Some(parent_info.underlying_ino)
+        } else {
+            let mut ino: i64 = 1;
+            let mut found_all = true;
+            for comp in parent_info.path.split('/').filter(|s| !s.is_empty()) {
+                if let Some(s) = self.delta.lookup(ino, comp).await? {
+                    ino = s.ino;
+                } else {
+                    found_all = false;
+                    break;
+                }
+            }
+            if found_all {
+                Some(ino)
+            } else {
+                None
+            }
+        };
+
+        if let Some(delta_parent_ino) = delta_parent_ino {
+            let _ = FileSystem::unlink(&self.delta, delta_parent_ino, name).await;
         }
 
         // Check if exists in base
@@ -1090,9 +1157,30 @@ impl FileSystem for OverlayFS {
             return Err(FsError::NotEmpty.into());
         }
 
-        // Try to remove from delta
-        if parent_info.layer == Layer::Delta {
-            let _ = FileSystem::rmdir(&self.delta, parent_info.underlying_ino, name).await;
+        // Try to remove from delta - always walk the path to find delta parent
+        // (it may exist even if the overlay inode points to base layer)
+        let delta_parent_ino = if parent_info.layer == Layer::Delta {
+            Some(parent_info.underlying_ino)
+        } else {
+            let mut ino: i64 = 1;
+            let mut found_all = true;
+            for comp in parent_info.path.split('/').filter(|s| !s.is_empty()) {
+                if let Some(s) = self.delta.lookup(ino, comp).await? {
+                    ino = s.ino;
+                } else {
+                    found_all = false;
+                    break;
+                }
+            }
+            if found_all {
+                Some(ino)
+            } else {
+                None
+            }
+        };
+
+        if let Some(delta_parent_ino) = delta_parent_ino {
+            let _ = FileSystem::rmdir(&self.delta, delta_parent_ino, name).await;
         }
 
         // Check if exists in base
@@ -2013,6 +2101,163 @@ mod tests {
         let file = overlay.open(toml_stats.ino).await?;
         let content = file.pread(0, 100).await?;
         assert_eq!(content, b"[package]\nname = \"sdk\"");
+
+        Ok(())
+    }
+
+    /// Test that files created in delta layer under a base directory are visible
+    /// in readdir and can be deleted with unlink.
+    ///
+    /// This test reproduces a bug where:
+    /// 1. Base has a directory (e.g., `.git/`)
+    /// 2. A file is created in that directory via overlay (e.g., `.git/index.lock`)
+    /// 3. `ensure_parent_dirs` creates `.git` in delta with origin mapping
+    /// 4. But the overlay inode for `.git` still has `layer: Layer::Base`
+    /// 5. readdir only checks delta if layer == Delta, so the new file is invisible
+    /// 6. unlink only deletes from delta if parent layer == Delta, so deletion fails
+    #[tokio::test]
+    async fn test_overlay_readdir_and_unlink_delta_file_in_base_dir() -> Result<()> {
+        // Setup: base has a .git directory with some files
+        let base_dir = tempdir()?;
+        std::fs::create_dir(base_dir.path().join(".git"))?;
+        std::fs::write(base_dir.path().join(".git/config"), b"[core]\n")?;
+        std::fs::write(base_dir.path().join(".git/HEAD"), b"ref: refs/heads/main")?;
+
+        let base = Arc::new(HostFS::new(base_dir.path())?);
+
+        let delta_dir = tempdir()?;
+        let db_path = delta_dir.path().join("delta.db");
+        let delta = AgentFS::new(db_path.to_str().unwrap()).await?;
+
+        let overlay = OverlayFS::new(base, delta);
+        overlay.init(base_dir.path().to_str().unwrap()).await?;
+
+        // Step 1: Lookup .git directory (creates Base layer mapping)
+        let git_stats = overlay.lookup(ROOT_INO, ".git").await?.unwrap();
+        assert!(git_stats.is_directory());
+
+        // Step 2: Create a new file in .git (triggers ensure_parent_dirs)
+        let (lock_stats, lock_file) = overlay
+            .create_file(git_stats.ino, "index.lock", DEFAULT_FILE_MODE, 0, 0)
+            .await?;
+        lock_file.pwrite(0, b"lock content").await?;
+        assert!(lock_stats.is_file());
+
+        // Step 3: Verify readdir shows the new file (BUG: was invisible)
+        let entries = overlay.readdir(git_stats.ino).await?.unwrap();
+        assert!(
+            entries.contains(&"index.lock".to_string()),
+            "readdir should show index.lock, got: {:?}",
+            entries
+        );
+        // Also verify base files are still visible
+        assert!(entries.contains(&"config".to_string()));
+        assert!(entries.contains(&"HEAD".to_string()));
+
+        // Step 4: Verify lookup also works
+        let lookup_stats = overlay.lookup(git_stats.ino, "index.lock").await?.unwrap();
+        assert!(lookup_stats.is_file());
+
+        // Step 5: Delete the file
+        overlay.unlink(git_stats.ino, "index.lock").await?;
+
+        // Step 6: Verify the file is actually gone (BUG: persisted after unlink)
+        let deleted = overlay.lookup(git_stats.ino, "index.lock").await?;
+        assert!(
+            deleted.is_none(),
+            "index.lock should be deleted, but lookup still finds it"
+        );
+
+        // Also verify readdir no longer shows it
+        let entries_after = overlay.readdir(git_stats.ino).await?.unwrap();
+        assert!(
+            !entries_after.contains(&"index.lock".to_string()),
+            "readdir should not show index.lock after deletion"
+        );
+
+        // Base files should still be there
+        assert!(entries_after.contains(&"config".to_string()));
+        assert!(entries_after.contains(&"HEAD".to_string()));
+
+        Ok(())
+    }
+
+    /// Test readdir_plus also shows delta files in base directories.
+    #[tokio::test]
+    async fn test_overlay_readdir_plus_delta_file_in_base_dir() -> Result<()> {
+        let base_dir = tempdir()?;
+        std::fs::create_dir(base_dir.path().join("mydir"))?;
+        std::fs::write(base_dir.path().join("mydir/base.txt"), b"base")?;
+
+        let base = Arc::new(HostFS::new(base_dir.path())?);
+
+        let delta_dir = tempdir()?;
+        let db_path = delta_dir.path().join("delta.db");
+        let delta = AgentFS::new(db_path.to_str().unwrap()).await?;
+
+        let overlay = OverlayFS::new(base, delta);
+        overlay.init(base_dir.path().to_str().unwrap()).await?;
+
+        // Lookup the directory (Base layer)
+        let dir_stats = overlay.lookup(ROOT_INO, "mydir").await?.unwrap();
+
+        // Create a file in the directory
+        let (_stats, file) = overlay
+            .create_file(dir_stats.ino, "delta.txt", DEFAULT_FILE_MODE, 0, 0)
+            .await?;
+        file.pwrite(0, b"delta").await?;
+
+        // readdir_plus should show both base and delta files
+        let entries = overlay.readdir_plus(dir_stats.ino).await?.unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+
+        assert!(
+            names.contains(&"base.txt"),
+            "readdir_plus should show base.txt"
+        );
+        assert!(
+            names.contains(&"delta.txt"),
+            "readdir_plus should show delta.txt"
+        );
+
+        Ok(())
+    }
+
+    /// Test rmdir works for directories created in delta under base parent.
+    #[tokio::test]
+    async fn test_overlay_rmdir_delta_dir_in_base_parent() -> Result<()> {
+        let base_dir = tempdir()?;
+        std::fs::create_dir(base_dir.path().join("parent"))?;
+        std::fs::write(base_dir.path().join("parent/existing.txt"), b"existing")?;
+
+        let base = Arc::new(HostFS::new(base_dir.path())?);
+
+        let delta_dir = tempdir()?;
+        let db_path = delta_dir.path().join("delta.db");
+        let delta = AgentFS::new(db_path.to_str().unwrap()).await?;
+
+        let overlay = OverlayFS::new(base, delta);
+        overlay.init(base_dir.path().to_str().unwrap()).await?;
+
+        // Lookup base directory
+        let parent_stats = overlay.lookup(ROOT_INO, "parent").await?.unwrap();
+
+        // Create a subdirectory in delta
+        let subdir_stats = overlay
+            .mkdir(parent_stats.ino, "newsubdir", 0o755, 0, 0)
+            .await?;
+        assert!(subdir_stats.is_directory());
+
+        // Verify it exists
+        let lookup = overlay.lookup(parent_stats.ino, "newsubdir").await?;
+        assert!(lookup.is_some());
+
+        // Delete it with rmdir
+        overlay.rmdir(parent_stats.ino, "newsubdir").await?;
+
+        // Verify it's gone
+        let deleted = overlay.lookup(parent_stats.ino, "newsubdir").await?;
+        assert!(deleted.is_none(), "newsubdir should be deleted after rmdir");
 
         Ok(())
     }
