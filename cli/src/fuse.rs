@@ -10,7 +10,9 @@ use crate::fuser::{
 use agentfs_sdk::error::Error as SdkError;
 use agentfs_sdk::filesystem::{S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFSOCK};
 use agentfs_sdk::{BoxedFile, FileSystem, Stats, TimeChange};
+use lev_reactive::{HookContext, HookDecision, HookRegistry};
 use parking_lot::Mutex;
+use serde_json;
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -105,6 +107,10 @@ struct AgentFSFuse {
     open_files: Arc<Mutex<HashMap<u64, OpenFile>>>,
     /// Next file handle to allocate
     next_fh: AtomicU64,
+    /// Synchronous hooks executed before file operations
+    sync_hooks: Option<HookRegistry>,
+    /// Asynchronous hooks executed after file operations
+    async_hooks: Option<HookRegistry>,
 }
 
 impl Filesystem for AgentFSFuse {
@@ -931,11 +937,52 @@ impl Filesystem for AgentFSFuse {
             open_file.file.clone()
         };
 
+        // Execute synchronous hooks BEFORE write
+        if let Some(ref sync_hooks) = self.sync_hooks {
+            let ctx = HookContext {
+                event_type: "file:write".to_string(),
+                source: "levfs".to_string(),
+                data: serde_json::json!({
+                    "fh": fh,
+                    "offset": offset,
+                    "size": data.len(),
+                }),
+            };
+            match sync_hooks.execute_sync(&ctx) {
+                Ok(HookDecision::Deny) | Ok(HookDecision::AllowWithMessage(_)) => {
+                    reply.error(libc::EPERM);
+                    return;
+                }
+                Ok(HookDecision::Allow) | Ok(HookDecision::Transform(_)) => {}
+                Err(_) => {
+                    reply.error(libc::EIO);
+                    return;
+                }
+            }
+        }
+
         let data_len = data.len();
         let data_vec = data.to_vec();
         let result = self
             .runtime
             .block_on(async move { file.pwrite(offset as u64, &data_vec).await });
+
+        // Execute asynchronous hooks AFTER write (fire-and-forget)
+        if let Some(ref async_hooks) = self.async_hooks {
+            let ctx = HookContext {
+                event_type: "file:write".to_string(),
+                source: "levfs".to_string(),
+                data: serde_json::json!({
+                    "fh": fh,
+                    "offset": offset,
+                    "size": data_len,
+                }),
+            };
+            let hooks = async_hooks.clone();
+            self.runtime.spawn(async move {
+                let _ = hooks.execute_async(&ctx).await;
+            });
+        }
 
         match result {
             Ok(()) => reply.written(data_len as u32),
@@ -1081,6 +1128,8 @@ impl AgentFSFuse {
             runtime,
             open_files: Arc::new(Mutex::new(HashMap::new())),
             next_fh: AtomicU64::new(1),
+            sync_hooks: None,
+            async_hooks: None,
         }
     }
 

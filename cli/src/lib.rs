@@ -1,4 +1,5 @@
 pub mod cmd;
+pub mod levfs;
 pub mod opts;
 pub mod sandbox;
 
