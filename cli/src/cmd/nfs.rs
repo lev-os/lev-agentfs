@@ -47,7 +47,7 @@ pub async fn handle_nfs_command(id_or_path: String, bind: String, port: u32) -> 
     };
 
     // Create NFS adapter
-    let nfs = AgentNFS::new(fs);
+    let nfs = AgentNFS::with_env_hooks(fs);
 
     // Bind NFS server
     let bind_addr_str = format!("{}:{}", bind, port);

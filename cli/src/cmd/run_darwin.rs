@@ -90,7 +90,7 @@ pub async fn run(
     let fs: Arc<Mutex<dyn FileSystem>> = Arc::new(Mutex::new(overlay));
 
     // Create NFS adapter
-    let nfs = AgentNFS::new(fs);
+    let nfs = AgentNFS::with_env_hooks(fs);
 
     // Find an available port
     let port = find_available_port(DEFAULT_NFS_PORT)?;

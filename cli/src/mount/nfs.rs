@@ -83,7 +83,7 @@ pub(super) async fn mount_nfs(
 ) -> Result<MountHandle> {
     use tokio_util::sync::CancellationToken;
 
-    let nfs = AgentNFS::new(fs);
+    let nfs = AgentNFS::with_env_hooks(fs);
 
     let port = find_available_port(DEFAULT_NFS_PORT)?;
 

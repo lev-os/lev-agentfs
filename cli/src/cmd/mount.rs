@@ -253,7 +253,7 @@ async fn mount_nfs_backend(args: MountArgs) -> Result<()> {
         // Handle drops automatically when we exit this scope
     } else {
         // Daemon mode: use manual NFS server setup for persistent background operation
-        let nfs = AgentNFS::new(fs);
+        let nfs = AgentNFS::with_env_hooks(fs);
         let port = find_available_port(DEFAULT_NFS_PORT)?;
 
         let bind_addr = format!("127.0.0.1:{}", port);

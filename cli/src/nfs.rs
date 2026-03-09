@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use libc::{O_RDONLY, O_RDWR};
 
+use crate::levfs::{HookRunError, HookRunner};
 use crate::nfsserve::nfs::{
     fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, nfstime3, sattr3, set_atime, set_gid3,
     set_mode3, set_mtime, set_size3, set_uid3, specdata3,
@@ -55,12 +56,55 @@ fn error_to_nfsstat(e: SdkError) -> nfsstat3 {
 pub struct AgentNFS {
     /// The underlying filesystem (wrapped in Mutex to serialize operations)
     fs: Arc<Mutex<dyn FileSystem>>,
+    /// Shared reactive hook runner.
+    hooks: HookRunner,
 }
 
 impl AgentNFS {
     /// Create a new NFS adapter wrapping the given filesystem.
     pub fn new(fs: Arc<Mutex<dyn FileSystem>>) -> Self {
-        AgentNFS { fs }
+        Self::with_hooks(fs, HookRunner::disabled())
+    }
+
+    /// Create a new NFS adapter with explicit hook runner configuration.
+    pub fn with_hooks(fs: Arc<Mutex<dyn FileSystem>>, hooks: HookRunner) -> Self {
+        AgentNFS { fs, hooks }
+    }
+
+    /// Create a new NFS adapter using environment-configured hooks.
+    pub fn with_env_hooks(fs: Arc<Mutex<dyn FileSystem>>) -> Self {
+        Self::with_hooks(fs, HookRunner::from_env())
+    }
+
+    /// Run sync hooks and map failures to NFS errors (fail closed).
+    fn run_sync_hook(&self, event_type: &str, payload: serde_json::Value) -> Result<(), nfsstat3> {
+        match self.hooks.before_event("nfs", event_type, payload) {
+            Ok(()) => Ok(()),
+            Err(HookRunError::Denied(reason)) => {
+                tracing::warn!(
+                    event_type = event_type,
+                    reason = %reason,
+                    "NFS operation denied by sync hook"
+                );
+                Err(nfsstat3::NFS3ERR_ACCES)
+            }
+            Err(HookRunError::Failed(err)) => {
+                tracing::error!(
+                    event_type = event_type,
+                    error = %err,
+                    "NFS hook execution failed"
+                );
+                Err(nfsstat3::NFS3ERR_IO)
+            }
+        }
+    }
+
+    /// Spawn async hooks after a successful operation.
+    fn spawn_async_hook(&self, event_type: &'static str, payload: serde_json::Value) {
+        let hooks = self.hooks.clone();
+        tokio::spawn(async move {
+            hooks.after_event("nfs", event_type, payload).await;
+        });
     }
 
     /// Convert AgentFS Stats to NFS fattr3.
@@ -255,19 +299,29 @@ impl NFSFileSystem for AgentNFS {
     }
 
     async fn write(&self, id: fileid3, offset: u64, data: &[u8]) -> Result<fattr3, nfsstat3> {
-        let fs = self.fs.lock().await;
+        let hook_payload = serde_json::json!({
+            "file_id": id,
+            "offset": offset,
+            "size": data.len(),
+        });
 
-        let file = fs
-            .open(id_to_fs_ino(id), O_RDWR)
-            .await
-            .map_err(error_to_nfsstat)?;
-        file.pwrite(offset, data).await.map_err(error_to_nfsstat)?;
+        self.run_sync_hook("file:write", hook_payload.clone())?;
 
-        let stats = fs
-            .getattr(id_to_fs_ino(id))
-            .await
-            .map_err(error_to_nfsstat)?
-            .ok_or(nfsstat3::NFS3ERR_NOENT)?;
+        let stats = {
+            let fs = self.fs.lock().await;
+            let file = fs
+                .open(id_to_fs_ino(id), O_RDWR)
+                .await
+                .map_err(error_to_nfsstat)?;
+            file.pwrite(offset, data).await.map_err(error_to_nfsstat)?;
+
+            fs.getattr(id_to_fs_ino(id))
+                .await
+                .map_err(error_to_nfsstat)?
+                .ok_or(nfsstat3::NFS3ERR_NOENT)?
+        };
+
+        self.spawn_async_hook("file:write", hook_payload);
 
         Ok(self.stats_to_fattr(&stats))
     }
@@ -288,11 +342,34 @@ impl NFSFileSystem for AgentNFS {
             set_mode3::Void => 0o644,
         };
 
+        let hook_payload = serde_json::json!({
+            "dir_id": dirid,
+            "dir_ino": dir_fs_ino,
+            "name": name,
+            "mode": mode,
+            "uid": auth.uid,
+            "gid": auth.gid,
+            "exclusive": false,
+        });
+        self.run_sync_hook("file:create", hook_payload.clone())?;
+
         let fs = self.fs.lock().await;
         let (stats, _file) = fs
             .create_file(dir_fs_ino, name, S_IFREG | mode, auth.uid, auth.gid)
             .await
             .map_err(error_to_nfsstat)?;
+
+        let post_payload = serde_json::json!({
+            "dir_id": dirid,
+            "dir_ino": dir_fs_ino,
+            "name": name,
+            "mode": mode,
+            "uid": auth.uid,
+            "gid": auth.gid,
+            "exclusive": false,
+            "created_id": stats.ino as fileid3,
+        });
+        self.spawn_async_hook("file:create", post_payload);
 
         let ino = stats.ino as fileid3;
         let fattr = self.stats_to_fattr(&stats);
@@ -307,6 +384,17 @@ impl NFSFileSystem for AgentNFS {
     ) -> Result<fileid3, nfsstat3> {
         let dir_fs_ino = id_to_fs_ino(dirid);
         let name = std::str::from_utf8(filename).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+
+        let hook_payload = serde_json::json!({
+            "dir_id": dirid,
+            "dir_ino": dir_fs_ino,
+            "name": name,
+            "mode": 0o644u32,
+            "uid": auth.uid,
+            "gid": auth.gid,
+            "exclusive": true,
+        });
+        self.run_sync_hook("file:create", hook_payload.clone())?;
 
         let fs = self.fs.lock().await;
 
@@ -325,6 +413,18 @@ impl NFSFileSystem for AgentNFS {
             .create_file(dir_fs_ino, name, S_IFREG | 0o644, auth.uid, auth.gid)
             .await
             .map_err(error_to_nfsstat)?;
+
+        let post_payload = serde_json::json!({
+            "dir_id": dirid,
+            "dir_ino": dir_fs_ino,
+            "name": name,
+            "mode": 0o644u32,
+            "uid": auth.uid,
+            "gid": auth.gid,
+            "exclusive": true,
+            "created_id": stats.ino as fileid3,
+        });
+        self.spawn_async_hook("file:create", post_payload);
 
         Ok(stats.ino as fileid3)
     }
@@ -345,12 +445,33 @@ impl NFSFileSystem for AgentNFS {
             set_mode3::Void => 0o755,
         };
 
+        let hook_payload = serde_json::json!({
+            "dir_id": dirid,
+            "dir_ino": dir_fs_ino,
+            "name": name,
+            "mode": mode,
+            "uid": auth.uid,
+            "gid": auth.gid,
+        });
+        self.run_sync_hook("file:mkdir", hook_payload.clone())?;
+
         let fs = self.fs.lock().await;
 
         let stats = fs
             .mkdir(dir_fs_ino, name, mode, auth.uid, auth.gid)
             .await
             .map_err(error_to_nfsstat)?;
+
+        let post_payload = serde_json::json!({
+            "dir_id": dirid,
+            "dir_ino": dir_fs_ino,
+            "name": name,
+            "mode": mode,
+            "uid": auth.uid,
+            "gid": auth.gid,
+            "created_id": stats.ino as fileid3,
+        });
+        self.spawn_async_hook("file:mkdir", post_payload);
 
         let ino = stats.ino as fileid3;
         let fattr = self.stats_to_fattr(&stats);
@@ -411,21 +532,44 @@ impl NFSFileSystem for AgentNFS {
         let name = std::str::from_utf8(filename).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
         let fs = self.fs.lock().await;
-
-        // Check if it's a file or directory and use appropriate method
+        // Keep lookup + hook decision + mutation under one lock to avoid TOCTOU.
         let stats = fs
             .lookup(dir_fs_ino, name)
             .await
             .map_err(error_to_nfsstat)?
             .ok_or(nfsstat3::NFS3ERR_NOENT)?;
+        let target_id = stats.ino as fileid3;
+        let is_directory = stats.is_directory();
 
-        if stats.is_directory() {
+        let hook_payload = serde_json::json!({
+            "dir_id": dirid,
+            "dir_ino": dir_fs_ino,
+            "name": name,
+            "target_id": target_id,
+            "is_directory": is_directory,
+        });
+        match self.hooks.before_event("nfs", "file:unlink", hook_payload.clone()) {
+            Ok(()) => {}
+            Err(HookRunError::Denied(reason)) => {
+                tracing::warn!(event_type = "file:unlink", reason = %reason, "NFS operation denied by sync hook");
+                return Err(nfsstat3::NFS3ERR_ACCES);
+            }
+            Err(HookRunError::Failed(err)) => {
+                tracing::error!(event_type = "file:unlink", error = %err, "NFS hook execution failed");
+                return Err(nfsstat3::NFS3ERR_IO);
+            }
+        }
+
+        if is_directory {
             fs.rmdir(dir_fs_ino, name).await.map_err(error_to_nfsstat)?;
         } else {
             fs.unlink(dir_fs_ino, name)
                 .await
                 .map_err(error_to_nfsstat)?;
         }
+        drop(fs);
+
+        self.spawn_async_hook("file:unlink", hook_payload);
 
         Ok(())
     }
@@ -442,11 +586,23 @@ impl NFSFileSystem for AgentNFS {
         let from_name = std::str::from_utf8(from_filename).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
         let to_name = std::str::from_utf8(to_filename).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
+        let hook_payload = serde_json::json!({
+            "from_dir_id": from_dirid,
+            "from_dir_ino": from_dir_fs_ino,
+            "from_name": from_name,
+            "to_dir_id": to_dirid,
+            "to_dir_ino": to_dir_fs_ino,
+            "to_name": to_name,
+        });
+        self.run_sync_hook("file:rename", hook_payload.clone())?;
+
         let fs = self.fs.lock().await;
 
         fs.rename(from_dir_fs_ino, from_name, to_dir_fs_ino, to_name)
             .await
             .map_err(error_to_nfsstat)?;
+
+        self.spawn_async_hook("file:rename", hook_payload);
 
         Ok(())
     }

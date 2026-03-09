@@ -7,6 +7,7 @@ use crate::fuser::{
     ReplyCreate, ReplyData, ReplyDirectory, ReplyDirectoryPlus, ReplyEmpty, ReplyEntry, ReplyOpen,
     ReplyStatfs, ReplyWrite, Request,
 };
+use crate::levfs::{HookRunError, HookRunner};
 use agentfs_sdk::error::Error as SdkError;
 use agentfs_sdk::filesystem::{S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFSOCK};
 use agentfs_sdk::{BoxedFile, FileSystem, Stats, TimeChange};
@@ -583,12 +584,36 @@ impl Filesystem for AgentFSFuse {
         let gid = req.gid();
         let fs = self.fs.clone();
         let name_owned = name_str.to_string();
+        let hook_payload = serde_json::json!({
+            "dir_id": parent,
+            "dir_ino": parent,
+            "name": name_owned,
+            "mode": mode,
+            "uid": uid,
+            "gid": gid,
+        });
+
+        if let Err(errno) = self.run_sync_hook("file:mkdir", hook_payload.clone()) {
+            reply.error(errno);
+            return;
+        }
+
         let result = self
             .runtime
-            .block_on(async move { fs.mkdir(parent as i64, &name_owned, mode, uid, gid).await });
+            .block_on(async move { fs.mkdir(parent as i64, name_str, mode, uid, gid).await });
 
         match result {
             Ok(stats) => {
+                let post_payload = serde_json::json!({
+                    "dir_id": parent,
+                    "dir_ino": parent,
+                    "name": name_str,
+                    "mode": mode,
+                    "uid": uid,
+                    "gid": gid,
+                    "created_id": stats.ino as u64,
+                });
+                self.spawn_async_hook("file:mkdir", post_payload);
                 let attr = fillattr(&stats);
                 reply.entry(&TTL, &attr, 0);
             }
@@ -612,12 +637,47 @@ impl Filesystem for AgentFSFuse {
 
         let fs = self.fs.clone();
         let name_owned = name_str.to_string();
+        let lookup_result = self
+            .runtime
+            .block_on(async move { fs.lookup(parent as i64, &name_owned).await });
+        let target = match lookup_result {
+            Ok(Some(stats)) => stats,
+            Ok(None) => {
+                reply.error(libc::ENOENT);
+                return;
+            }
+            Err(e) => {
+                reply.error(error_to_errno(&e));
+                return;
+            }
+        };
+        if !target.is_directory() {
+            reply.error(libc::ENOTDIR);
+            return;
+        }
+
+        let fs = self.fs.clone();
+        let name_owned = name_str.to_string();
+        let hook_payload = serde_json::json!({
+            "dir_id": parent,
+            "dir_ino": parent,
+            "name": name_str,
+            "target_id": target.ino as u64,
+            "is_directory": target.is_directory(),
+        });
+
+        if let Err(errno) = self.run_sync_hook("file:unlink", hook_payload.clone()) {
+            reply.error(errno);
+            return;
+        }
+
         let result = self
             .runtime
             .block_on(async move { fs.rmdir(parent as i64, &name_owned).await });
 
         match result {
             Ok(()) => {
+                self.spawn_async_hook("file:unlink", hook_payload);
                 reply.ok();
             }
             Err(e) => reply.error(error_to_errno(&e)),
@@ -639,7 +699,7 @@ impl Filesystem for AgentFSFuse {
         name: &OsStr,
         mode: u32,
         _umask: u32,
-        _flags: i32,
+        flags: i32,
         reply: ReplyCreate,
     ) {
         tracing::debug!(
@@ -659,13 +719,40 @@ impl Filesystem for AgentFSFuse {
         let gid = req.gid();
         let fs = self.fs.clone();
         let name_owned = name_str.to_string();
+        let exclusive = (flags & libc::O_EXCL) != 0;
+        let hook_payload = serde_json::json!({
+            "dir_id": parent,
+            "dir_ino": parent,
+            "name": name_owned,
+            "mode": mode,
+            "uid": uid,
+            "gid": gid,
+            "exclusive": exclusive,
+        });
+
+        if let Err(errno) = self.run_sync_hook("file:create", hook_payload.clone()) {
+            reply.error(errno);
+            return;
+        }
+
         let result = self.runtime.block_on(async move {
-            fs.create_file(parent as i64, &name_owned, mode, uid, gid)
+            fs.create_file(parent as i64, name_str, mode, uid, gid)
                 .await
         });
 
         match result {
             Ok((stats, file)) => {
+                let post_payload = serde_json::json!({
+                    "dir_id": parent,
+                    "dir_ino": parent,
+                    "name": name_str,
+                    "mode": mode,
+                    "uid": uid,
+                    "gid": gid,
+                    "exclusive": exclusive,
+                    "created_id": stats.ino as u64,
+                });
+                self.spawn_async_hook("file:create", post_payload);
                 let attr = fillattr(&stats);
 
                 let fh = self.alloc_fh();
@@ -782,12 +869,47 @@ impl Filesystem for AgentFSFuse {
 
         let fs = self.fs.clone();
         let name_owned = name_str.to_string();
+        let lookup_result = self
+            .runtime
+            .block_on(async move { fs.lookup(parent as i64, &name_owned).await });
+        let target = match lookup_result {
+            Ok(Some(stats)) => stats,
+            Ok(None) => {
+                reply.error(libc::ENOENT);
+                return;
+            }
+            Err(e) => {
+                reply.error(error_to_errno(&e));
+                return;
+            }
+        };
+        if target.is_directory() {
+            reply.error(libc::EISDIR);
+            return;
+        }
+
+        let fs = self.fs.clone();
+        let name_owned = name_str.to_string();
+        let hook_payload = serde_json::json!({
+            "dir_id": parent,
+            "dir_ino": parent,
+            "name": name_str,
+            "target_id": target.ino as u64,
+            "is_directory": target.is_directory(),
+        });
+
+        if let Err(errno) = self.run_sync_hook("file:unlink", hook_payload.clone()) {
+            reply.error(errno);
+            return;
+        }
+
         let result = self
             .runtime
             .block_on(async move { fs.unlink(parent as i64, &name_owned).await });
 
         match result {
             Ok(()) => {
+                self.spawn_async_hook("file:unlink", hook_payload);
                 reply.ok();
             }
             Err(e) => reply.error(error_to_errno(&e)),
@@ -828,6 +950,20 @@ impl Filesystem for AgentFSFuse {
         let fs = self.fs.clone();
         let old_name_owned = old_name_str.to_string();
         let new_name_owned = new_name_str.to_string();
+        let hook_payload = serde_json::json!({
+            "from_dir_id": parent,
+            "from_dir_ino": parent,
+            "from_name": old_name_str,
+            "to_dir_id": newparent,
+            "to_dir_ino": newparent,
+            "to_name": new_name_str,
+        });
+
+        if let Err(errno) = self.run_sync_hook("file:rename", hook_payload.clone()) {
+            reply.error(errno);
+            return;
+        }
+
         let result = self.runtime.block_on(async move {
             fs.rename(
                 parent as i64,
@@ -840,6 +976,7 @@ impl Filesystem for AgentFSFuse {
 
         match result {
             Ok(()) => {
+                self.spawn_async_hook("file:rename", hook_payload);
                 reply.ok();
             }
             Err(e) => reply.error(error_to_errno(&e)),
@@ -907,7 +1044,7 @@ impl Filesystem for AgentFSFuse {
     fn write(
         &mut self,
         _req: &Request,
-        _ino: u64,
+        ino: u64,
         fh: u64,
         offset: i64,
         data: &[u8],
@@ -938,7 +1075,14 @@ impl Filesystem for AgentFSFuse {
             .block_on(async move { file.pwrite(offset as u64, &data_vec).await });
 
         match result {
-            Ok(()) => reply.written(data_len as u32),
+            Ok(()) => {
+                // Execute asynchronous hooks AFTER write (fire-and-forget).
+                let hooks = self.hooks.clone();
+                self.runtime.spawn(async move {
+                    hooks.after_write("fuse", hook_payload).await;
+                });
+                reply.written(data_len as u32)
+            }
             Err(e) => reply.error(error_to_errno(&e)),
         }
     }
@@ -1090,6 +1234,32 @@ impl AgentFSFuse {
     /// handle that identifies an open file throughout its lifetime.
     fn alloc_fh(&self) -> u64 {
         self.next_fh.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// Run sync hooks and map policy errors to FUSE errno values.
+    fn run_sync_hook(&self, event_type: &str, payload: serde_json::Value) -> Result<(), i32> {
+        match self.hooks.before_event("fuse", event_type, payload) {
+            Ok(()) => Ok(()),
+            Err(HookRunError::Denied(reason)) => {
+                tracing::warn!(event_type = event_type, reason = %reason, "FUSE operation denied by sync hook");
+                Err(libc::EACCES)
+            }
+            Err(HookRunError::Failed(err)) => {
+                tracing::error!(event_type = event_type, error = %err, "FUSE hook execution failed");
+                Err(libc::EIO)
+            }
+        }
+    }
+
+    /// Execute async post-operation hooks in the background.
+    fn spawn_async_hook(&self, event_type: &str, payload: serde_json::Value) {
+        let hooks = self.hooks.clone();
+        let event_type_owned = event_type.to_string();
+        self.runtime.spawn(async move {
+            hooks
+                .after_event("fuse", &event_type_owned, payload)
+                .await;
+        });
     }
 }
 
