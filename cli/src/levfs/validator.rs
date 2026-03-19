@@ -230,7 +230,7 @@ pub extern "C" fn create_plugin() -> *mut dyn SyncHook {
 
 #[no_mangle]
 #[allow(improper_ctypes_definitions)]
-pub extern "C" fn destroy_plugin(ptr: *mut dyn SyncHook) {
+pub unsafe extern "C" fn destroy_plugin(ptr: *mut dyn SyncHook) {
     if !ptr.is_null() {
         unsafe {
             let _ = Box::from_raw(ptr);
