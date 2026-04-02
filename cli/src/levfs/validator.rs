@@ -86,8 +86,9 @@ impl LevFSValidator {
         let frontmatter_content = lines[1..end_idx].join("\n");
 
         // Parse YAML
-        let data: HashMap<String, serde_json::Value> = serde_yaml::from_str(&frontmatter_content)
-            .map_err(|e| lev_reactive::LevError::ConfigError(format!("Invalid YAML: {}", e)))?;
+        let data: HashMap<String, serde_json::Value> =
+            serde_yaml::from_str(&frontmatter_content)
+                .map_err(|e| lev_reactive::LevError::ConfigError(format!("Invalid YAML: {}", e)))?;
 
         Ok(Some(Frontmatter { data }))
     }
@@ -103,18 +104,22 @@ impl LevFSValidator {
             )));
         }
 
-        let content = fs::read_to_string(&schema_path)
-            .map_err(|e| lev_reactive::LevError::Io(e))?;
+        let content = fs::read_to_string(&schema_path).map_err(lev_reactive::LevError::Io)?;
 
-        let schema: Schema = serde_yaml::from_str(&content)
-            .map_err(|e| lev_reactive::LevError::ConfigError(format!("Invalid schema YAML: {}", e)))?;
+        let schema: Schema = serde_yaml::from_str(&content).map_err(|e| {
+            lev_reactive::LevError::ConfigError(format!("Invalid schema YAML: {}", e))
+        })?;
 
         self.schemas.insert(schema_name.to_string(), schema);
         Ok(())
     }
 
     /// Validate frontmatter against schema
-    fn validate_against_schema(&self, frontmatter: &Frontmatter, schema: &Schema) -> Result<HookDecision> {
+    fn validate_against_schema(
+        &self,
+        frontmatter: &Frontmatter,
+        schema: &Schema,
+    ) -> Result<HookDecision> {
         // Check required fields
         for field in &schema.required_fields {
             if !frontmatter.data.contains_key(field) {
@@ -132,18 +137,12 @@ impl LevFSValidator {
     fn check_size(&self, size: usize) -> HookDecision {
         if size > self.max_size {
             HookDecision::Block {
-                reason: format!(
-                    "File size {} exceeds maximum {}",
-                    size, self.max_size
-                ),
+                reason: format!("File size {} exceeds maximum {}", size, self.max_size),
             }
         } else if size > (self.max_size * 80 / 100) {
             // Warn at 80% threshold
             HookDecision::Warn {
-                message: format!(
-                    "File size {} approaching maximum {}",
-                    size, self.max_size
-                ),
+                message: format!("File size {} approaching maximum {}", size, self.max_size),
             }
         } else {
             HookDecision::Allow
@@ -183,16 +182,19 @@ impl SyncHook for LevFSValidator {
 
     fn execute(&self, context: &HookContext) -> Result<HookDecision> {
         // Extract file content from payload
-        let content = context.payload.get("content")
+        let content = context
+            .payload
+            .get("content")
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        let size = context.payload.get("size")
+        let size = context
+            .payload
+            .get("size")
             .and_then(|v| v.as_u64())
             .unwrap_or(content.len() as u64) as usize;
 
-        let schema_name = context.metadata.get("schema")
-            .map(|s| s.as_str());
+        let schema_name = context.metadata.get("schema").map(|s| s.as_str());
 
         // Check size first
         let size_decision = self.check_size(size);
@@ -229,7 +231,7 @@ pub extern "C" fn create_plugin() -> *mut dyn SyncHook {
 }
 
 #[no_mangle]
-#[allow(improper_ctypes_definitions)]
+#[allow(clippy::missing_safety_doc, improper_ctypes_definitions)]
 pub unsafe extern "C" fn destroy_plugin(ptr: *mut dyn SyncHook) {
     if !ptr.is_null() {
         unsafe {
@@ -258,7 +260,10 @@ Document content here
         assert!(result.is_some());
 
         let frontmatter = result.unwrap();
-        assert_eq!(frontmatter.data.get("title").unwrap().as_str().unwrap(), "Test Document");
+        assert_eq!(
+            frontmatter.data.get("title").unwrap().as_str().unwrap(),
+            "Test Document"
+        );
     }
 
     #[test]
@@ -278,9 +283,15 @@ Document content here
         assert!(matches!(validator.check_size(500), HookDecision::Allow));
 
         // Warning threshold
-        assert!(matches!(validator.check_size(850), HookDecision::Warn { .. }));
+        assert!(matches!(
+            validator.check_size(850),
+            HookDecision::Warn { .. }
+        ));
 
         // Over limit
-        assert!(matches!(validator.check_size(1500), HookDecision::Block { .. }));
+        assert!(matches!(
+            validator.check_size(1500),
+            HookDecision::Block { .. }
+        ));
     }
 }

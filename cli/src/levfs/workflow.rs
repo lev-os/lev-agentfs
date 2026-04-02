@@ -51,9 +51,8 @@ impl AsyncHook for WorkflowHook {
 
     async fn execute(&self, context: &HookContext) -> lev_reactive::Result<HookDecision> {
         let workflow_name = self.workflow_name.clone();
-        let context_json = serde_json::to_string(context).map_err(|e| {
-            lev_reactive::LevError::Serialization(e)
-        })?;
+        let context_json =
+            serde_json::to_string(context).map_err(lev_reactive::LevError::Serialization)?;
 
         // Spawn async workflow execution without blocking
         tokio::spawn(async move {
@@ -120,6 +119,7 @@ async fn execute_workflow(workflow_name: &str, context_json: &str) -> anyhow::Re
 
 /// C ABI entry point for dynamic plugin loading
 #[no_mangle]
+#[allow(improper_ctypes_definitions)]
 pub extern "C" fn _plugin_create() -> *mut dyn Plugin {
     let plugin = LevFSWorkflow::new("default-workflow");
     Box::into_raw(Box::new(plugin))
@@ -154,10 +154,7 @@ mod tests {
             workflow_name: "test".to_string(),
         };
 
-        let context = HookContext::new(
-            "test-event",
-            json!({"key": "value"})
-        );
+        let context = HookContext::new("test-event", json!({"key": "value"}));
 
         let result = hook.execute(&context).await;
         assert!(result.is_ok());

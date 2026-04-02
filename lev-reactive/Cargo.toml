@@ -1,0 +1,17 @@
+[package]
+name = "lev-reactive"
+version = "0.1.0"
+edition = "2021"
+authors = ["Leviathan Team"]
+description = "Reactive hook primitives used by AgentFS"
+license = "MIT"
+
+[dependencies]
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+
+[lib]
+crate-type = ["cdylib", "rlib"]

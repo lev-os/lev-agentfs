@@ -11,7 +11,6 @@ use crate::levfs::{HookRunError, HookRunner};
 use agentfs_sdk::error::Error as SdkError;
 use agentfs_sdk::filesystem::{S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFSOCK};
 use agentfs_sdk::{BoxedFile, FileSystem, Stats, TimeChange};
-use lev_reactive::{HookContext, HookDecision, HookRegistry};
 use parking_lot::Mutex;
 use serde_json;
 use std::{
@@ -108,10 +107,8 @@ struct AgentFSFuse {
     open_files: Arc<Mutex<HashMap<u64, OpenFile>>>,
     /// Next file handle to allocate
     next_fh: AtomicU64,
-    /// Synchronous hooks executed before file operations
-    sync_hooks: Option<HookRegistry>,
-    /// Asynchronous hooks executed after file operations
-    async_hooks: Option<HookRegistry>,
+    /// Shared reactive hook runner.
+    hooks: HookRunner,
 }
 
 impl Filesystem for AgentFSFuse {
@@ -1074,28 +1071,15 @@ impl Filesystem for AgentFSFuse {
             open_file.file.clone()
         };
 
-        // Execute synchronous hooks BEFORE write
-        if let Some(ref sync_hooks) = self.sync_hooks {
-            let ctx = HookContext {
-                event_type: "file:write".to_string(),
-                source: "levfs".to_string(),
-                data: serde_json::json!({
-                    "fh": fh,
-                    "offset": offset,
-                    "size": data.len(),
-                }),
-            };
-            match sync_hooks.execute_sync(&ctx) {
-                Ok(HookDecision::Deny) | Ok(HookDecision::AllowWithMessage(_)) => {
-                    reply.error(libc::EPERM);
-                    return;
-                }
-                Ok(HookDecision::Allow) | Ok(HookDecision::Transform(_)) => {}
-                Err(_) => {
-                    reply.error(libc::EIO);
-                    return;
-                }
-            }
+        let hook_payload = serde_json::json!({
+            "ino": ino,
+            "fh": fh,
+            "offset": offset,
+            "size": data.len(),
+        });
+        if let Err(errno) = self.run_sync_hook("file:write", hook_payload.clone()) {
+            reply.error(errno);
+            return;
         }
 
         let data_len = data.len();
@@ -1104,30 +1088,9 @@ impl Filesystem for AgentFSFuse {
             .runtime
             .block_on(async move { file.pwrite(offset as u64, &data_vec).await });
 
-        // Execute asynchronous hooks AFTER write (fire-and-forget)
-        if let Some(ref async_hooks) = self.async_hooks {
-            let ctx = HookContext {
-                event_type: "file:write".to_string(),
-                source: "levfs".to_string(),
-                data: serde_json::json!({
-                    "fh": fh,
-                    "offset": offset,
-                    "size": data_len,
-                }),
-            };
-            let hooks = async_hooks.clone();
-            self.runtime.spawn(async move {
-                let _ = hooks.execute_async(&ctx).await;
-            });
-        }
-
         match result {
             Ok(()) => {
-                // Execute asynchronous hooks AFTER write (fire-and-forget).
-                let hooks = self.hooks.clone();
-                self.runtime.spawn(async move {
-                    hooks.after_write("fuse", hook_payload).await;
-                });
+                self.spawn_async_hook("file:write", hook_payload);
                 reply.written(data_len as u32)
             }
             Err(e) => reply.error(error_to_errno(&e)),
@@ -1272,8 +1235,7 @@ impl AgentFSFuse {
             runtime,
             open_files: Arc::new(Mutex::new(HashMap::new())),
             next_fh: AtomicU64::new(1),
-            sync_hooks: None,
-            async_hooks: None,
+            hooks: HookRunner::from_env(),
         }
     }
 
@@ -1305,9 +1267,7 @@ impl AgentFSFuse {
         let hooks = self.hooks.clone();
         let event_type_owned = event_type.to_string();
         self.runtime.spawn(async move {
-            hooks
-                .after_event("fuse", &event_type_owned, payload)
-                .await;
+            hooks.after_event("fuse", &event_type_owned, payload).await;
         });
     }
 }
