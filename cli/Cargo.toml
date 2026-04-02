@@ -25,7 +25,7 @@ sandbox = [
 
 [dependencies]
 agentfs-sdk = { path = "../sdk/rust" }
-lev-reactive = { path = "../../lev-reactive" }
+lev-reactive = { path = "../lev-reactive" }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1.0"

@@ -548,7 +548,10 @@ impl NFSFileSystem for AgentNFS {
             "target_id": target_id,
             "is_directory": is_directory,
         });
-        match self.hooks.before_event("nfs", "file:unlink", hook_payload.clone()) {
+        match self
+            .hooks
+            .before_event("nfs", "file:unlink", hook_payload.clone())
+        {
             Ok(()) => {}
             Err(HookRunError::Denied(reason)) => {
                 tracing::warn!(event_type = "file:unlink", reason = %reason, "NFS operation denied by sync hook");
