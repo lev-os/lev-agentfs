@@ -1,147 +1,153 @@
 # AgentFS Feature Parity
 
-**Last updated:** 2026-02-11
-**Upstream version:** 0.6.0-pre.4
+> Current source audit 2026-10-16. Lev 8b59f2922229ab936712310421ec83ff619362ce. Upstream pins: tursodatabase/agentfs@0a014ebd4918615baff589ed17486e557e7c6a23; carried 8af5d6a564a7ad7a8c62bceb2aac2f87a396d750.
+> Rows are current source assessments, not runtime or production acceptance. Narrative implementation claims and numeric measurements retain their original dates unless explicitly audited current; existing design requirements and source contracts are unchanged. Change tags are proposals; regressed means assessment correction only where noted. Stable rows retain the label decision pending JP.
+
+**Last updated:** 2026-10-16 (source audit; historical label:2026-02-11)
+**Upstream version:** 0.6.4 (`0a014ebd4918615baff589ed17486e557e7c6a23`)
+**Carried version:** 0.6.0-pre.4 (`8af5d6a564a7ad7a8c62bceb2aac2f87a396d750`)
+
+This table tracks the 81 listed source features. Retained Done labels were not runtime-tested in this review and do not certify complete parity with newer upstream.
 
 ## Core Filesystem (upstream)
 
 | Feature | Status | Notes |
 |---|:---:|---|
-| SQLite inode/dentry/data schema | Done | SPEC.md v0.4 |
-| Chunked file storage (4KB default) | Done | `fs_data` table |
-| Hard links | Done | `nlink` tracking in `fs_inode` |
-| Symbolic links | Done | `fs_symlink` table |
-| Special files (FIFO, device, socket) | Done | `rdev` + mode bits |
-| Nanosecond timestamps | Done | `*_nsec` columns |
-| File permissions (chmod) | Done | Mode bits in `fs_inode` |
-| File ownership (chown) | Done | `uid`/`gid` in `fs_inode` |
-| utimens (atime/mtime) | Done | `TimeChange` enum |
-| Connection pool | Done | `connection_pool.rs` |
-| Prepared statement cache | Done | v0.5.3 |
-| Dentry cache | Done | v0.5.1 |
+| SQLite inode/dentry/data schema | Done | Tables present; newer upstream schema-version/migration gate not carried Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/agentfs.rs:467-510`; `sdk/rust/src/filesystem/agentfs.rs:539-582`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:468-511](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L468); [sdk/rust/src/filesystem/agentfs.rs:540-583](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L540). Historical comparison: SPEC.md v0.4 |
+| Chunked file storage (4KB default) | Done | `fs_data` table Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/agentfs.rs:16-59`; `sdk/rust/src/filesystem/agentfs.rs:341-384`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:17-60](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L17); [sdk/rust/src/filesystem/agentfs.rs:342-385](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L342). |
+| Hard links | Done | `nlink` tracking in `fs_inode` Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/agentfs.rs:1959-2002`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:1967-2010](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L1967). |
+| Symbolic links | Done | `fs_symlink` table Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/agentfs.rs:1872-1915`; `sdk/rust/src/filesystem/agentfs.rs:2034-2077`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:1880-1923](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L1880); [sdk/rust/src/filesystem/agentfs.rs:2042-2085](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L2042). |
+| Special files (FIFO, device, socket) | Done | `rdev` + mode bits Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/agentfs.rs:1116-1159`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:1124-1167](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L1124). |
+| Nanosecond timestamps | Done | `*_nsec` columns Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/agentfs.rs:498-541`; `sdk/rust/src/filesystem/agentfs.rs:795-838`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:499-542](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L499); [sdk/rust/src/filesystem/agentfs.rs:803-846](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L803). |
+| File permissions (chmod) | Done | Mode bits in `fs_inode` Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/agentfs.rs:2809-2852`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:2817-2860](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L2817). |
+| File ownership (chown) | Done | `uid`/`gid` in `fs_inode` Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/agentfs.rs:2203-2246`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:2211-2254](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L2211). |
+| utimens (atime/mtime) | Done | `TimeChange` enum Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/agentfs.rs:2887-2930`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:2895-2938](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L2895). |
+| Connection pool | Done | Pooled reuse; MAX_CONNECTIONS=1 serializes access Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/connection_pool.rs:77-120`; `sdk/rust/src/connection_pool.rs:12-55`. Upstream: [sdk/rust/src/connection_pool.rs:77-120](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/connection_pool.rs#L77); [sdk/rust/src/connection_pool.rs:12-55](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/connection_pool.rs#L12). |
+| Prepared statement cache | Done | v0.5.3 Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/agentfs.rs:90-133`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:91-134](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L91). |
+| Dentry cache | Done | v0.5.1 Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/agentfs.rs:24-67`; `sdk/rust/src/filesystem/agentfs.rs:835-878`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:25-68](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L25); [sdk/rust/src/filesystem/agentfs.rs:843-886](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L843). |
 | **Subtotal** | **12/12** | **100%** |
 
 ## FUSE Surface (Linux)
 
 | Feature | Status | Notes |
 |---|:---:|---|
-| `init` (capabilities) | Done | async_read, writeback_cache, parallel_dirops, cache_symlinks |
-| `lookup` | Done | |
-| `getattr` | Done | |
-| `setattr` (chmod, truncate, utimens) | Done | |
-| `readdir` | Done | |
-| `readdirplus` | Done | Avoids N+1 queries |
-| `open` / `release` | Done | File handle tracking |
-| `read` (pread) | Done | |
-| `write` (pwrite) | Done | With hook integration |
-| `create` | Done | |
-| `mkdir` / `rmdir` | Done | |
-| `unlink` | Done | |
-| `rename` | Done | |
-| `symlink` / `readlink` | Done | |
-| `link` | Done | Hard links |
-| `mknod` | Done | Special files |
-| `flush` | Done | No-op (writes go to DB) |
-| `fsync` | Done | Per-file handle |
-| `statfs` | Done | Reports actual usage |
-| `forget` / `batch_forget` | Done | Inode cache lifecycle |
-| `chown` | Done | |
+| `init` (capabilities) | Done | async_read, writeback_cache, parallel_dirops, cache_symlinks Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:125-168`. Upstream: [cli/src/fuse.rs:122-165](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L122). |
+| `lookup` | Done |  Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:144-187`. Upstream: [cli/src/fuse.rs:141-184](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L141). |
+| `getattr` | Done |  Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:172-215`. Upstream: [cli/src/fuse.rs:169-212](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L169). |
+| `setattr` (chmod, truncate, utimens) | Done |  Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:210-253`. Upstream: [cli/src/fuse.rs:207-250](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L207). |
+| `readdir` | Done |  Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:346-389`. Upstream: [cli/src/fuse.rs:343-386](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L343). |
+| `readdirplus` | Done | Avoids N+1 queries Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:411-454`. Upstream: [cli/src/fuse.rs:408-451](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L408). |
+| `open` / `release` | Done | File handle tracking Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:994-1037`; `cli/src/fuse.rs:1140-1183`. Upstream: [cli/src/fuse.rs:860-903](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L860); [cli/src/fuse.rs:992-1035](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L992). |
+| `read` (pread) | Done |  Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:1013-1056`. Upstream: [cli/src/fuse.rs:879-922](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L879). |
+| `write` (pwrite) | Done | pwrite implemented; hook call sites currently use a no-op runner Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:1045-1088`; `cli/src/levfs/hooks.rs:55-73`. Upstream: [cli/src/fuse.rs:911-954](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L911); `cli/src/levfs/hooks.rs`. |
+| `create` | Done |  Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:696-739`. Upstream: [cli/src/fuse.rs:635-678](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L635). |
+| `mkdir` / `rmdir` | Done |  Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:563-606`; `cli/src/fuse.rs:631-674`. Upstream: [cli/src/fuse.rs:560-603](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L560); [cli/src/fuse.rs:604-647](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L604). |
+| `unlink` | Done |  Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:863-906`. Upstream: [cli/src/fuse.rs:775-818](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L775). |
+| `rename` | Done |  Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:923-966`. Upstream: [cli/src/fuse.rs:801-844](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L801). |
+| `symlink` / `readlink` | Done |  Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:773-816`; `cli/src/fuse.rs:191-234`. Upstream: [cli/src/fuse.rs:685-728](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L685); [cli/src/fuse.rs:188-231](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L188). |
+| `link` | Done | Hard links Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:823-866`. Upstream: [cli/src/fuse.rs:735-778](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L735). |
+| `mknod` | Done | Special files Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:516-559`. Upstream: [cli/src/fuse.rs:513-556](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L513). |
+| `flush` | Done | No-op (writes go to DB) Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:1101-1144`. Upstream: [cli/src/fuse.rs:953-996](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L953). |
+| `fsync` | Done | Per-file handle Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:1115-1158`. Upstream: [cli/src/fuse.rs:967-1010](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L967). |
+| `statfs` | Done | Reports actual usage Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:1158-1201`. Upstream: [cli/src/fuse.rs:1010-1053](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L1010). |
+| `forget` / `batch_forget` | Done | Inode cache lifecycle Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:1201-1244`; `cli/src/fuse.rs:1212-1255`. Upstream: [cli/src/fuse.rs:1053-1096](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L1053); [cli/src/fuse.rs:1064-1107](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L1064). |
+| `chown` | Done | Handled through setattr uid/gid Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:250-293`. Upstream: [cli/src/fuse.rs:247-290](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L247). |
 | **Subtotal** | **21/21** | **100%** |
 
 ## NFS Surface (macOS + Linux)
 
 | Feature | Status | Notes |
 |---|:---:|---|
-| NFS v3 server | Done | `nfsserve` vendored |
-| macOS `mount_nfs` | Done | `mount_nfs -o locallocks,vers=3` |
-| Linux `mount -t nfs` | Done | |
-| Auto port selection | Done | Scans from 11111 |
+| NFS v3 server | Done | `nfsserve` vendored Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/nfs.rs:16-59`; `cli/src/nfsserve/nfs.rs:18-47`; `cli/src/nfsserve/nfs_handlers.rs:122-151`. Upstream: [cli/src/cmd/nfs.rs:16-59](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/nfs.rs#L16); [cli/src/nfsserve/nfs.rs:18-47](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/nfsserve/nfs.rs#L18); [cli/src/nfsserve/nfs_handlers.rs:122-151](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/nfsserve/nfs_handlers.rs#L122). |
+| macOS `mount_nfs` | Done | `mount_nfs -o locallocks,vers=3` Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/mount/nfs.rs:163-184`. Upstream: [cli/src/mount/nfs.rs:163-184](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/mount/nfs.rs#L163). |
+| Linux `mount -t nfs` | Done |  Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/mount/nfs.rs:134-177`. Upstream: [cli/src/mount/nfs.rs:134-177](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/mount/nfs.rs#L134). |
+| Auto port selection | Done | Scans from 11111 Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/mount/nfs.rs:118-161`; `cli/src/mount/nfs.rs:13-56`. Upstream: [cli/src/mount/nfs.rs:118-161](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/mount/nfs.rs#L118); [cli/src/mount/nfs.rs:13-56](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/mount/nfs.rs#L13). |
 | **Subtotal** | **4/4** | **100%** |
 
 ## Overlay Filesystem
 
 | Feature | Status | Notes |
 |---|:---:|---|
-| OverlayFS (HostFS + AgentFS) | Done | Copy-on-write delta |
-| Whiteout tracking | Done | `fs_whiteout` table |
-| Inode origin tracking (copy-up) | Done | `fs_origin` table |
-| In-memory whiteout cache | Done | v0.5.1 |
-| NormalizedPath type | Done | v0.5.1 |
-| Overlay config persistence | Done | `fs_overlay_config` table |
-| `diff` command | Done | Shows delta vs base |
-| **Subtotal** | **7/7** | **100%** |
+| OverlayFS (HostFS + AgentFS) | Done | Copy-on-write exists; newer upstream mapping/parent-resolution fixes not carried Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/overlayfs.rs:42-85`; `sdk/rust/src/filesystem/overlayfs.rs:408-451`. Upstream: [sdk/rust/src/filesystem/overlayfs.rs:42-85](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/overlayfs.rs#L42); [sdk/rust/src/filesystem/overlayfs.rs:499-542](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/overlayfs.rs#L499). |
+| Whiteout tracking | Done | Whiteouts persist; newer upstream stale-handle guards not carried Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/overlayfs.rs:95-138`. Upstream: [sdk/rust/src/filesystem/overlayfs.rs:95-138](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/overlayfs.rs#L95). |
+| Inode origin tracking (copy-up) | Done | Origin mappings persist; newer upstream remount mapping refresh not carried Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/overlayfs.rs:116-159`; `sdk/rust/src/filesystem/overlayfs.rs:329-372`. Upstream: [sdk/rust/src/filesystem/overlayfs.rs:116-159](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/overlayfs.rs#L116); [sdk/rust/src/filesystem/overlayfs.rs:367-410](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/overlayfs.rs#L367). |
+| In-memory whiteout cache | Done | v0.5.1 Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/overlayfs.rs:56-99`. Upstream: [sdk/rust/src/filesystem/overlayfs.rs:56-99](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/overlayfs.rs#L56). |
+| NormalizedPath type | Not started | Historical status Done; String normalization exists; no NormalizedPath type in SDK source Current source audit 2026-10-16: [regressed — assessment only; no runtime regression inferred]; Lev: `sdk/rust/src/filesystem/agentfs.rs:628-671`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:636-679](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L636). Historical comparison: v0.5.1 |
+| Overlay config persistence | Done | `fs_overlay_config` table Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/overlayfs.rs:103-146`. Upstream: [sdk/rust/src/filesystem/overlayfs.rs:103-146](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/overlayfs.rs#L103). |
+| `diff` command | Done | Shows delta vs base Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/fs.rs:197-240`. Upstream: [cli/src/cmd/fs.rs:197-240](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/fs.rs#L197). |
+| **Subtotal** | **6/7** Historical labels: **7/7** | **86%** Historical labels: **100%** |
 
 ## Sandbox
 
 | Feature | Status | Notes |
 |---|:---:|---|
-| Linux namespace isolation | Done | User + mount namespaces |
-| Default allow list (~/.config, etc.) | Done | Configurable via --allow |
-| Session isolation (--session) | Done | Shared delta layer |
-| ptrace sandbox (Reverie) | Experimental | `--experimental-sandbox` flag |
-| macOS sandbox | Not started | No namespace equivalent |
+| Linux namespace isolation | Done | User + mount namespaces Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/sandbox/linux.rs:585-628`. Upstream: [cli/src/sandbox/linux.rs:585-628](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/sandbox/linux.rs#L585). |
+| Default allow list (~/.config, etc.) | Done | Defaults include .cache/.local/.claude; .config needs --allow Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/sandbox/linux.rs:57-100`. Upstream: [cli/src/sandbox/linux.rs:57-100](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/sandbox/linux.rs#L57). |
+| Session isolation (--session) | Done | Shared delta layer Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/sandbox/linux.rs:154-200`; `cli/src/opts.rs:156-199`. Upstream: [cli/src/sandbox/linux.rs:154-200](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/sandbox/linux.rs#L154); [cli/src/opts.rs:156-199](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/opts.rs#L156). |
+| ptrace sandbox (Reverie) | Experimental | `--experimental-sandbox` flag Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/sandbox/linux_ptrace.rs:12-50`. Upstream: [cli/src/sandbox/linux_ptrace.rs:12-50](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/sandbox/linux_ptrace.rs#L12). |
+| macOS sandbox | Partial | sandbox-exec write-policy path exists; macOS enforcement unverified Current source audit 2026-10-16: [closer]; Lev: `cli/src/cmd/run_darwin.rs:364-407`; `cli/src/sandbox/darwin.rs:61-104`. Upstream: [cli/src/cmd/run_darwin.rs:364-407](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/run_darwin.rs#L364); [cli/src/sandbox/darwin.rs:61-104](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/sandbox/darwin.rs#L61). |
 | **Subtotal** | **3/5** | **60%** |
 
 ## Lev Integration
 
 | Feature | Status | Notes |
 |---|:---:|---|
-| `lev-reactive` sync hooks (pre-write) | Done | Fires before FUSE write |
-| `lev-reactive` async hooks (post-write) | Done | Fire-and-forget after write |
-| LevFS Validator plugin | Done | Size, frontmatter, schema |
-| LevFS Workflow plugin | Done | Flowmind CLI spawn |
-| Dynamic plugin loading (C ABI) | Done | `create_plugin()` / `_plugin_create()` |
-| Hook config from XDG | Partial | Path defined, loading not wired |
-| Hooks on non-write ops | Not started | Only `write()` has hooks |
-| NFS hook support | Not started | macOS has no hooks |
-| ConnectorPort (governed reads) | Not started | Planned kernel feature |
-| BindingPort (governed writes) | Not started | Planned kernel feature |
-| **Subtotal** | **5/10** | **50%** |
+| `lev-reactive` sync hooks (pre-write) | Partial | Historical status Done; FUSE call sites exist; HookRunner always permits and does not call lev-reactive Current source audit 2026-10-16: [regressed — assessment only; no runtime regression inferred]; Lev: `cli/src/levfs/hooks.rs:55-73`; `cli/src/fuse.rs:1078-1121`; `lev-reactive/src/lib.rs:126-169`. Upstream: `cli/src/levfs/hooks.rs`; [cli/src/fuse.rs:911-957](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L911); `cli/src/fuse.rs`; `lev-reactive/src/lib.rs`. |
+| `lev-reactive` async hooks (post-write) | Partial | Historical status Done; Post-write call sites exist; HookRunner notification method is empty Current source audit 2026-10-16: [regressed — assessment only; no runtime regression inferred]; Lev: `cli/src/levfs/hooks.rs:68-73`; `cli/src/fuse.rs:1091-1134`; `lev-reactive/src/lib.rs:146-189`. Upstream: `cli/src/levfs/hooks.rs`; [cli/src/fuse.rs:911-957](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L911); `cli/src/fuse.rs`; `lev-reactive/src/lib.rs`. |
+| LevFS Validator plugin | Done | Validator type and tests exist; mount activation is not wired Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/levfs/validator.rs:176-219`; `cli/src/levfs/validator.rs:116-159`. Upstream: `cli/src/levfs/validator.rs`; [cli/src/lib.rs:1-25](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/lib.rs#L1). |
+| LevFS Workflow plugin | Done | Hook type spawns flowmind; mount activation and CLI run unverified Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/levfs/workflow.rs:76-119`. Upstream: `cli/src/levfs/workflow.rs`; [cli/src/lib.rs:1-25](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/lib.rs#L1). |
+| Dynamic plugin loading (C ABI) | Partial | Historical status Done; Constructor exports only; no dynamic loader in CLI/reactive source Current source audit 2026-10-16: [regressed — assessment only; no runtime regression inferred]; Lev: `cli/src/levfs/workflow.rs:121-163`; `cli/src/levfs/validator.rs:226-269`. Upstream: `cli/src/levfs/workflow.rs`; `cli/src/levfs/validator.rs`; [cli/src/lib.rs:1-25](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/lib.rs#L1). |
+| Hook config from XDG | Partial | from_env returns disabled; XDG/env loading is a TODO Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/levfs/hooks.rs:46-73`. Upstream: `cli/src/levfs/hooks.rs`; [cli/src/lib.rs:1-25](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/lib.rs#L1). |
+| Hooks on non-write ops | Partial | create/mkdir/unlink/rename call sites exist; runner remains a no-op Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/fuse.rs:734-777`; `cli/src/fuse.rs:963-1006`; `cli/src/levfs/hooks.rs:55-73`. Upstream: [cli/src/fuse.rs:635-681](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/fuse.rs#L635); `cli/src/fuse.rs`; `cli/src/levfs/hooks.rs`. |
+| NFS hook support | Partial | NFS pre/post mutation call sites exist; shared runner remains a no-op Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/nfs.rs:73-116`; `cli/src/nfs.rs:306-349`; `cli/src/levfs/hooks.rs:55-73`. Upstream: [cli/src/nfs.rs:53-99](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/nfs.rs#L53); `cli/src/nfs.rs`; `cli/src/levfs/hooks.rs`. |
+| ConnectorPort (governed reads) | Not started | Planned kernel feature Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/lib.rs:1-26`. Upstream: [cli/src/lib.rs:1-25](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/lib.rs#L1); `cli/src/lib.rs`. |
+| BindingPort (governed writes) | Not started | Planned kernel feature Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/lib.rs:1-26`. Upstream: [cli/src/lib.rs:1-25](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/lib.rs#L1); `cli/src/lib.rs`. |
+| **Subtotal** | **2/10** Historical labels: **5/10** | **20%** Historical labels: **50%** |
 
 ## Serving & Protocols
 
 | Feature | Status | Notes |
 |---|:---:|---|
-| MCP server | Done | Filesystem + KV tools |
-| MCP tool filtering (--tools) | Done | Selective exposure |
-| NFS server (standalone) | Done | `agentfs serve nfs` |
+| MCP server | Done | Filesystem + KV tools Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/mcp_server.rs:105-148`. Upstream: [cli/src/cmd/mcp_server.rs:105-148](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/mcp_server.rs#L105). |
+| MCP tool filtering (--tools) | Done | Selective exposure Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/mcp_server.rs:64-107`. Upstream: [cli/src/cmd/mcp_server.rs:64-107](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/mcp_server.rs#L64). |
+| NFS server (standalone) | Done | `agentfs serve nfs` Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/nfs.rs:16-59`; `cli/src/main.rs:287-330`. Upstream: [cli/src/cmd/nfs.rs:16-59](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/nfs.rs#L16); [cli/src/main.rs:287-316](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/main.rs#L287). |
 | **Subtotal** | **3/3** | **100%** |
 
 ## Operational
 
 | Feature | Status | Notes |
 |---|:---:|---|
-| `agentfs ps` (list sessions) | Done | |
-| `agentfs prune mounts` | Done | Linux only |
-| `agentfs timeline` | Done | Table + JSON output |
-| `agentfs diff` | Done | Overlay delta view |
-| `agentfs fs ls/cat/write` | Done | Direct DB access |
-| Shell completions | Done | Install/uninstall/show |
-| Turso cloud sync (pull/push) | Done | |
-| Encryption (aegis/aes) | Done | Multiple cipher options |
-| Daemonize (background mount) | Done | Linux |
+| `agentfs ps` (list sessions) | Done | Lists session proc files; liveness check uses Linux /proc Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/ps.rs:66-109`. Upstream: [cli/src/cmd/ps.rs:66-109](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/ps.rs#L66). |
+| `agentfs prune mounts` | Done | Linux only Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/mount.rs:519-562`. Upstream: [cli/src/cmd/mount.rs:548-591](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/mount.rs#L548). |
+| `agentfs timeline` | Done | Table + JSON output Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/timeline.rs:36-79`; `cli/src/cmd/timeline.rs:20-63`. Upstream: [cli/src/cmd/timeline.rs:36-79](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/timeline.rs#L36); [cli/src/cmd/timeline.rs:20-63](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/timeline.rs#L20). |
+| `agentfs diff` | Done | Overlay delta view Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/fs.rs:197-240`. Upstream: [cli/src/cmd/fs.rs:197-240](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/fs.rs#L197). |
+| `agentfs fs ls/cat/write` | Done | Direct DB access Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/fs.rs:13-56`; `cli/src/cmd/fs.rs:103-146`; `cli/src/cmd/fs.rs:127-170`. Upstream: [cli/src/cmd/fs.rs:13-56](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/fs.rs#L13); [cli/src/cmd/fs.rs:103-146](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/fs.rs#L103); [cli/src/cmd/fs.rs:127-170](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/fs.rs#L127). |
+| Shell completions | Done | Install/uninstall/show Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/completions.rs:72-115`. Upstream: [cli/src/cmd/completions.rs:72-115](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/completions.rs#L72). |
+| Turso cloud sync (pull/push) | Done | pull/push available; cannot combine cloud sync with local encryption Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/sync.rs:3-46`; `cli/src/cmd/sync.rs:13-46`; `sdk/rust/src/lib.rs:301-344`. Upstream: [cli/src/cmd/sync.rs:3-46](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/sync.rs#L3); [cli/src/cmd/sync.rs:13-46](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/sync.rs#L13); [sdk/rust/src/lib.rs:303-346](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/lib.rs#L303). |
+| Encryption (aegis/aes) | Done | Turso cipher/key options; local encryption excludes cloud sync Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/lib.rs:337-380`; `sdk/rust/src/lib.rs:301-344`. Upstream: [sdk/rust/src/lib.rs:339-382](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/lib.rs#L339); [sdk/rust/src/lib.rs:303-346](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/lib.rs#L303). |
+| Daemonize (background mount) | Done | Linux Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/cmd/mount.rs:165-208`; `cli/src/lib.rs:5-26`. Upstream: [cli/src/cmd/mount.rs:188-231](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/cmd/mount.rs#L188); [cli/src/lib.rs:4-25](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/lib.rs#L4). |
 | **Subtotal** | **9/9** | **100%** |
 
 ## Integrity & Reliability
 
 | Feature | Status | Notes |
 |---|:---:|---|
-| Data checksums | Not started | No corruption detection |
-| Scrub / integrity check | Not started | |
-| WAL-based recovery | Not started | SQLite WAL exists but no tooling |
-| Multi-writer concurrency | Not started | SQLite is single-writer |
+| Data checksums | Not started | No corruption detection Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/filesystem/agentfs.rs:539-582`. Upstream: [sdk/rust/src/filesystem/agentfs.rs:540-583](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/filesystem/agentfs.rs#L540). |
+| Scrub / integrity check | Not started |  Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/opts.rs:64-107`. Upstream: [cli/src/opts.rs:64-107](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/opts.rs#L64). |
+| WAL-based recovery | Not started | Cloud-sync checkpoint exists; no local WAL recovery/repair command found Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/lib.rs:434-477`. Upstream: [sdk/rust/src/lib.rs:441-484](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/lib.rs#L441). |
+| Multi-writer concurrency | Not started | MAX_CONNECTIONS=1 serializes the pool; multi-process writes unverified Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/src/connection_pool.rs:12-55`. Upstream: [sdk/rust/src/connection_pool.rs:12-55](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/src/connection_pool.rs#L12). |
 | **Subtotal** | **0/4** | **0%** |
 
 ## Testing
 
 | Feature | Status | Notes |
 |---|:---:|---|
-| C syscall tests (rename, stat, etc.) | Done | `cli/tests/syscall/` |
-| Shell integration tests | Done | `cli/tests/test-*.sh` |
-| Benchmark suite (Criterion) | Done | `sdk/rust/benches/` |
-| LevFS validator unit tests | Done | `validator.rs` tests |
-| LevFS workflow unit tests | Done | `workflow.rs` tests |
-| Conformance golden fixtures | Not started | No golden comparison |
+| C syscall tests (rename, stat, etc.) | Done | `cli/tests/syscall/` Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/tests/syscall/test-rename.c:5-48`. Upstream: [cli/tests/syscall/test-rename.c:5-48](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/tests/syscall/test-rename.c#L5). |
+| Shell integration tests | Done | `cli/tests/test-*.sh` Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/tests/test-mount.sh:1-42`. Upstream: [cli/tests/test-mount.sh:1-42](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/tests/test-mount.sh#L1). |
+| Benchmark suite (Criterion) | Done | `sdk/rust/benches/` Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `sdk/rust/benches/workload.rs:7-50`. Upstream: [sdk/rust/benches/workload.rs:7-50](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/sdk/rust/benches/workload.rs#L7). |
+| LevFS validator unit tests | Done | `validator.rs` tests Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/levfs/validator.rs:246-289`. Upstream: `cli/src/levfs/validator.rs`; [cli/src/lib.rs:1-25](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/lib.rs#L1). |
+| LevFS workflow unit tests | Done | `workflow.rs` tests Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/src/levfs/workflow.rs:132-163`. Upstream: `cli/src/levfs/workflow.rs`; [cli/src/lib.rs:1-25](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/lib.rs#L1). |
+| Conformance golden fixtures | Not started | No golden comparison Current source audit 2026-10-16: source reviewed; stable-row label pending JP; Lev: `cli/tests/all.sh:1-24`. Upstream: [cli/tests/all.sh:1-26](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/tests/all.sh#L1); [cli/src/lib.rs:1-25](https://raw.githubusercontent.com/tursodatabase/agentfs/0a014ebd4918615baff589ed17486e557e7c6a23/cli/src/lib.rs#L1). |
 | **Subtotal** | **5/6** | **83%** |
 
 ---
@@ -153,14 +159,14 @@
 | Core Filesystem | 12/12 (100%) |
 | FUSE Surface | 21/21 (100%) |
 | NFS Surface | 4/4 (100%) |
-| Overlay Filesystem | 7/7 (100%) |
+| Overlay Filesystem | 6/7 (86%) Historical labels: 7/7 (100%) |
 | Sandbox | 3/5 (60%) |
-| Lev Integration | 5/10 (50%) |
+| Lev Integration | 2/10 (20%) Historical labels: 5/10 (50%) |
 | Serving & Protocols | 3/3 (100%) |
 | Operational | 9/9 (100%) |
 | Integrity & Reliability | 0/4 (0%) |
 | Testing | 5/6 (83%) |
-| **Overall** | **69/81 (85%)** |
+| **Overall** | **65/81 (80%)** Historical labels: **69/81 (85%)** |
 
 ---
 
@@ -168,10 +174,10 @@
 
 | Priority | Gap | Impact |
 |---|---|---|
-| P1 | Hooks only on `write()` | Can't gate `create`, `unlink`, `rename` |
-| P1 | NFS path has no hooks | macOS users get no validation/workflow triggers |
+| P1 | Mount HookRunner is a no-op | FUSE/NFS calls do not execute reactive policy hooks |
+| P1 | NFS hook runner is a no-op | Mutation call sites exist; validation and workflows remain inactive |
 | P2 | No data integrity checking | Silent corruption possible |
-| P2 | Single-writer SQLite | Multi-agent contention bottleneck |
-| P2 | macOS sandbox | No isolation on macOS |
+| P2 | Single-connection pool | MAX_CONNECTIONS=1 serializes this AgentFS pool |
+| P2 | macOS sandbox not runtime-verified | sandbox-exec write-policy path exists; host denial proof is unverified |
 | P3 | Conformance golden fixtures | No regression detection |
 | P3 | ConnectorPort/BindingPort | Governed access not implemented |
